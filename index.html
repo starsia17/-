@@ -7,6 +7,8 @@
     <style>
         body { font-family: sans-serif; margin: 0; padding: 15px; box-sizing: border-box; }
         input { width: 100%; padding: 10px; margin: 5px 0; border: 1px solid #ccc; }
+        /* 플레이스홀더 색상을 더 연하게 조절 */
+        input::placeholder { color: #cccccc; } 
         button { width: 100%; padding: 10px; background: #007bff; color: white; border: none; margin-top: 5px; }
         #admin-menu { border: 1px solid #eee; padding: 10px; background: #f9f9f9; display: none; }
         #announcement-box { background: #ffeb3b; padding: 10px; margin-bottom: 10px; display: none; }
@@ -44,7 +46,7 @@
         <form id="form">
             <input type="file" id="imageInput" style="display:none" onchange="sendImage(event)">
             <button type="button" onclick="document.getElementById('imageInput').click()">🖼️</button>
-            <input id="input" autocomplete="off">
+            <input id="input" autocomplete="off" placeholder="채팅할 말을 작성해주세요.">
             <button>전송</button>
         </form>
     </div>
@@ -58,12 +60,14 @@
             const nickname = document.getElementById('nickname').value;
             const roomName = document.getElementById('roomName').value;
             const password = document.getElementById('roomPassword').value;
+            if(!nickname || !roomName) return alert("닉네임과 방 이름을 입력해주세요.");
             socket.emit('createRoom', { roomName, nickname, password });
         }
 
         function joinRoom(roomName, creator, passwordExists) {
             const myNickname = document.getElementById('nickname').value;
-            let inputPw = passwordExists ? prompt("비밀번호 입력") : "";
+            if(!myNickname) return alert("먼저 닉네임을 입력하세요.");
+            let inputPw = passwordExists === 'true' ? prompt("비밀번호 입력") : "";
             currentRoom = roomName;
             isCreator = (myNickname === creator);
             socket.emit('joinRoom', { roomName, password: inputPw });
@@ -78,7 +82,6 @@
             } else alert(data.message);
         });
 
-        // 공지 및 투표 기능
         function sendAnnouncement() {
             socket.emit('setAnnouncement', { roomName: currentRoom, text: document.getElementById('new-announce').value, nickname: document.getElementById('nickname').value });
         }
@@ -102,7 +105,6 @@
         });
         function vote(idx) { socket.emit('vote', { roomName: currentRoom, optionIndex: idx }); }
 
-        // [기존 채팅/이미지 로직은 그대로 유지]
         function sendImage(e) {
             const reader = new FileReader();
             reader.onload = (ev) => socket.emit('chat message', { room: currentRoom, text: ev.target.result, username: document.getElementById('nickname').value, isImage: true });
@@ -111,8 +113,10 @@
         
         document.getElementById('form').onsubmit = (e) => {
             e.preventDefault();
-            socket.emit('chat message', { room: currentRoom, text: document.getElementById('input').value, username: document.getElementById('nickname').value });
-            document.getElementById('input').value = '';
+            const input = document.getElementById('input');
+            if(!input.value) return;
+            socket.emit('chat message', { room: currentRoom, text: input.value, username: document.getElementById('nickname').value });
+            input.value = '';
         };
 
         socket.on('chat message', (msg) => {
@@ -124,7 +128,7 @@
         function leaveRoom() { location.reload(); }
         function deleteRoom() { socket.emit('deleteRoom', { roomName: currentRoom, nickname: document.getElementById('nickname').value }); leaveRoom(); }
         socket.on('initialRooms', (rooms) => {
-            document.getElementById('room-list').innerHTML = rooms.map(r => `<li onclick="joinRoom('${r.roomName}', '${r.creator}', '${r.password}')">${r.roomName}</li>`).join('');
+            document.getElementById('room-list').innerHTML = rooms.map(r => `<li onclick="joinRoom('${r.roomName}', '${r.creator}', '${!!r.password}')">${r.roomName} ${r.password ? '🔒' : ''}</li>`).join('');
         });
     </script>
 </body>
