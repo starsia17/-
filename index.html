@@ -2,129 +2,93 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Family Talk</title>
     <style>
-        body { font-family: sans-serif; margin: 0; padding: 15px; box-sizing: border-box; }
-        input { width: 100%; padding: 10px; margin: 5px 0; border: 1px solid #ccc; }
-        input::placeholder { color: #cccccc; } /* 플레이스홀더 옅은 색 */
-        button { width: 100%; padding: 10px; background: #007bff; color: white; border: none; margin-top: 5px; cursor: pointer; }
-        #admin-menu { border: 1px solid #eee; padding: 10px; background: #f9f9f9; display: none; }
-        #announcement-box { background: #ffeb3b; padding: 10px; margin-bottom: 10px; display: none; }
-        #poll-box { border: 2px solid #2196f3; padding: 10px; margin-bottom: 10px; display: none; }
-        #messages { height: 250px; overflow-y: scroll; border: 1px solid #ddd; padding: 10px; list-style: none; }
-        #messages li { padding: 5px; border-bottom: 1px solid #eee; }
+        body { font-family: sans-serif; padding: 10px; }
+        .profile-img { width: 60px; height: 60px; border-radius: 50%; cursor: pointer; }
+        .modal { display: none; position: fixed; top: 20%; left: 10%; width: 80%; padding: 20px; background: white; border: 1px solid #ccc; }
     </style>
 </head>
 <body>
 
     <div id="lobby">
-        <h2>Family Talk</h2>
+        <img id="my-profile" class="profile-img" src="default.png" onclick="document.getElementById('profileInput').click()">
+        <input type="file" id="profileInput" hidden onchange="setProfile(event)">
         <input id="nickname" placeholder="닉네임">
-        <input id="roomName" placeholder="방 이름">
-        <input id="roomPassword" type="password" placeholder="비밀번호(선택)">
-        <button onclick="createRoom()">방 만들기</button>
-        <ul id="room-list"></ul>
+        <button onclick="login()">접속</button>
+        <div id="friend-list"><h3>친구 목록</h3><ul id="friends"></ul></div>
     </div>
 
     <div id="chat-room" style="display:none;">
-        <h3 id="current-room-name"></h3>
-        <div id="announcement-box"></div>
-        <div id="poll-box"></div>
-        
-        <div id="admin-menu">
-            <input id="new-announce" placeholder="공지사항 입력">
-            <button onclick="sendAnnouncement()">공지 게시</button>
-            <input id="poll-question" placeholder="투표 질문">
-            <button onclick="createPoll()">투표 생성</button>
-        </div>
-
-        <button onclick="leaveRoom()" style="background:#6c757d;">뒤로 가기</button>
-        <button id="delete-btn" onclick="deleteRoom()" style="background:red;">방 삭제(방장만)</button>
-        
+        <h3 id="room-title"></h3>
         <ul id="messages"></ul>
-        <form id="form">
-            <input type="file" id="imageInput" style="display:none" onchange="sendImage(event)">
-            <button type="button" onclick="document.getElementById('imageInput').click()">🖼️</button>
-            <input id="input" autocomplete="off" placeholder="채팅할 말을 작성해주세요.">
-            <button>전송</button>
-        </form>
+        <input type="file" id="mediaInput" accept="image/*,video/*" onchange="sendMedia(event)">
+        <input id="chatInput">
+        <button onclick="sendMessage()">전송</button>
+    </div>
+
+    <div id="profile-modal" class="modal">
+        <img id="modal-img" width="100">
+        <h2 id="modal-name"></h2>
+        <button onclick="addFriend()">친구 추가</button>
+        <button onclick="document.getElementById('profile-modal').style.display='none'">닫기</button>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
         const socket = io();
-        let currentRoom = "", isCreator = false;
+        let myData = JSON.parse(localStorage.getItem('user')) || {nickname: '', profilePic: ''};
 
-        function createRoom() {
-            const nickname = document.getElementById('nickname').value;
-            const roomName = document.getElementById('roomName').value;
-            const password = document.getElementById('roomPassword').value;
-            if(!nickname || !roomName) return alert("닉네임과 방 이름을 입력해주세요.");
-            socket.emit('createRoom', { roomName, nickname, password });
-        }
-
-        socket.on('error', (msg) => alert(msg));
-
-        function joinRoom(roomName, creator, passwordExists) {
-            const myNickname = document.getElementById('nickname').value;
-            if(!myNickname) return alert("먼저 닉네임을 입력하세요.");
-            let inputPw = passwordExists === 'true' ? prompt("비밀번호 입력") : "";
-            currentRoom = roomName;
-            isCreator = (myNickname === creator);
-            socket.emit('joinRoom', { roomName, password: inputPw });
-        }
-
-        socket.on('joinResult', (data) => {
-            if (data.success) {
-                document.getElementById('lobby').style.display = 'none';
-                document.getElementById('chat-room').style.display = 'block';
-                if (isCreator) document.getElementById('admin-menu').style.display = 'block';
-                if (data.roomData.announcement) showAnnouncement(data.roomData.announcement);
-            } else alert(data.message);
-        });
-
-        // 기능 로직
-        function sendAnnouncement() { socket.emit('setAnnouncement', { roomName: currentRoom, text: document.getElementById('new-announce').value, nickname: document.getElementById('nickname').value }); }
-        socket.on('updateAnnouncement', (text) => showAnnouncement(text));
-        function showAnnouncement(text) {
-            const box = document.getElementById('announcement-box');
-            box.innerText = "📢 " + text;
-            box.style.display = 'block';
-        }
-
-        function createPoll() { socket.emit('createPoll', { roomName: currentRoom, question: document.getElementById('poll-question').value, options: ["예", "아니오"], nickname: document.getElementById('nickname').value }); }
-        socket.on('updatePoll', (poll) => {
-            const box = document.getElementById('poll-box');
-            box.innerHTML = `<strong>${poll.question}</strong><br><button onclick="vote(0)">예 (${poll.votes[0]})</button><button onclick="vote(1)">아니오 (${poll.votes[1]})</button>`;
-            box.style.display = 'block';
-        });
-        function vote(idx) { socket.emit('vote', { roomName: currentRoom, optionIndex: idx }); }
-
-        function sendImage(e) {
-            const reader = new FileReader();
-            reader.onload = (ev) => socket.emit('chat message', { room: currentRoom, text: ev.target.result, username: document.getElementById('nickname').value, isImage: true });
-            reader.readAsDataURL(e.target.files[0]);
-        }
-        
-        document.getElementById('form').onsubmit = (e) => {
-            e.preventDefault();
-            const input = document.getElementById('input');
-            if(!input.value) return;
-            socket.emit('chat message', { room: currentRoom, text: input.value, username: document.getElementById('nickname').value });
-            input.value = '';
+        // 로컬 데이터 로드
+        window.onload = () => {
+            if(myData.nickname) document.getElementById('nickname').value = myData.nickname;
         };
 
+        function setProfile(e) {
+            const reader = new FileReader();
+            reader.onload = (ev) => { myData.profilePic = ev.target.result; document.getElementById('my-profile').src = ev.target.result; };
+            reader.readAsDataURL(e.target.files[0]);
+        }
+
+        function login() {
+            myData.nickname = document.getElementById('nickname').value;
+            localStorage.setItem('user', JSON.stringify(myData));
+            socket.emit('join', myData);
+            document.getElementById('lobby').style.display = 'none';
+            document.getElementById('chat-room').style.display = 'block';
+        }
+
+        // 미디어 전송 (사진/영상 구분)
+        function sendMedia(e) {
+            const file = e.target.files[0];
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                socket.emit('chat message', {
+                    room: 'General',
+                    username: myData.nickname,
+                    text: ev.target.result,
+                    isMedia: true,
+                    isVideo: file.type.startsWith('video')
+                });
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // 메시지 수신 처리
         socket.on('chat message', (msg) => {
             const li = document.createElement('li');
-            li.innerHTML = msg.isImage ? `<strong>${msg.username}</strong>:<br><img src="${msg.text}" style="max-width:150px">` : `${msg.username}: ${msg.text}`;
+            li.innerHTML = msg.isMedia ? 
+                (msg.isVideo ? `<strong>${msg.username}</strong>: <video src="${msg.text}" width="200" controls></video>` 
+                             : `<strong>${msg.username}</strong>: <img src="${msg.text}" width="200">`)
+                : `<strong>${msg.username}</strong>: ${msg.text}`;
             document.getElementById('messages').appendChild(li);
         });
 
-        function leaveRoom() { location.reload(); }
-        function deleteRoom() { socket.emit('deleteRoom', { roomName: currentRoom, nickname: document.getElementById('nickname').value }); leaveRoom(); }
-        socket.on('initialRooms', (rooms) => {
-            document.getElementById('room-list').innerHTML = rooms.map(r => `<li onclick="joinRoom('${r.roomName}', '${r.creator}', '${!!r.password}')">${r.roomName} ${r.password ? '🔒' : ''}</li>`).join('');
+        socket.on('system', (msg) => alert(msg));
+        socket.on('friendAlert', (data) => {
+            if(confirm(`${data.sender}님으로부터 친구 요청이 왔습니다. 수락할까요?`)) {
+                socket.emit('acceptFriend', { myNickname: myData.nickname, friendNickname: data.sender });
+            }
         });
     </script>
 </body>
