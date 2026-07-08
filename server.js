@@ -4,12 +4,16 @@ const http = require('http').createServer(app);
 const io = require('socket.io')(http);
 const mongoose = require('mongoose');
 
-// DB 연결
-mongoose.connect(process.env.MONGODB_URI)
-  .then(() => console.log('DB 연결 성공'))
-  .catch(err => console.error('DB 연결 실패:', err));
+mongoose.connect(process.env.MONGODB_URI);
 
-// 모델 정의
+// 1. 방 모델
+const Room = mongoose.model('Room', new mongoose.Schema({
+    roomName: { type: String, unique: true },
+    password: { type: String, default: '' },
+    creator: String
+}));
+
+// 2. 유저 모델 (프로필 + 친구 관리)
 const User = mongoose.model('User', new mongoose.Schema({
     nickname: { type: String, unique: true },
     profilePic: String,
@@ -17,53 +21,41 @@ const User = mongoose.model('User', new mongoose.Schema({
     pendingRequests: [String]
 }));
 
-const Room = mongoose.model('Room', new mongoose.Schema({
-    roomName: String,
-    creator: String,
-    password: { type: String, default: '' }
-}));
-
-// 소켓 연결 관리
-const userSockets = {}; // { nickname: socketId }
-
 io.on('connection', (socket) => {
-    // 닉네임/프로필 설정 및 접속 알림
-    socket.on('join', async (data) => {
-        userSockets[data.nickname] = socket.id;
+    // 방 목록 & 유저 초기화
+    Room.find().then(rooms => socket.emit('updateRoomList', rooms));
+
+    // 프로필 저장/업데이트
+    socket.on('saveProfile', async (data) => {
         let user = await User.findOne({ nickname: data.nickname });
-        if (!user) user = await new User({ nickname: data.nickname, profilePic: data.profilePic }).save();
-        socket.emit('initUser', user);
+        if (!user) user = new User({ nickname: data.nickname, profilePic: data.profilePic });
+        else user.profilePic = data.profilePic;
+        await user.save();
     });
 
-    // 친구 신청
+    // 친구 시스템 (요청)
     socket.on('friendRequest', async (data) => {
         const target = await User.findOne({ nickname: data.target });
         if (target && !target.pendingRequests.includes(data.sender)) {
             target.pendingRequests.push(data.sender);
             await target.save();
-            io.to(userSockets[data.target]).emit('friendAlert', { sender: data.sender });
+            // 실제 서비스 시 해당 유저 소켓을 찾아 알림 전송 로직 추가 필요
         }
     });
 
-    // 친구 수락
-    socket.on('acceptFriend', async (data) => {
-        const user = await User.findOne({ nickname: data.myNickname });
-        const friend = await User.findOne({ nickname: data.friendNickname });
-        user.friends.push(data.friendNickname);
-        user.pendingRequests = user.pendingRequests.filter(n => n !== data.friendNickname);
-        friend.friends.push(data.myNickname);
-        await user.save(); await friend.save();
-        io.to(userSockets[data.friendNickname]).emit('friendAccepted', data.myNickname);
-    });
-
-    // 채팅 및 파일 전송
-    socket.on('chat message', (msg) => {
-        io.to(msg.room).emit('chat message', msg);
+    // 방 만들기/입장
+    socket.on('createRoom', async (data) => {
+        try { await new Room(data).save(); io.emit('updateRoomList', await Room.find()); }
+        catch (err) { socket.emit('error', '방 이름이 중복되었습니다.'); }
     });
 
     socket.on('joinRoom', (data) => {
         socket.join(data.roomName);
         io.to(data.roomName).emit('system', `${data.nickname}님이 입장했습니다.`);
+    });
+
+    socket.on('chat message', (msg) => {
+        io.to(msg.room).emit('chat message', msg);
     });
 });
 
