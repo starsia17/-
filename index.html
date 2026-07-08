@@ -2,37 +2,38 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Family Talk</title>
     <style>
-        body { font-family: sans-serif; margin: 0; background: #f4f7f6; padding: 10px; }
-        .container { max-width: 500px; margin: 0 auto; background: white; padding: 20px; border-radius: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        #chat-area { display: none; height: 90vh; flex-direction: column; }
-        #messages { flex: 1; overflow-y: auto; border: 1px solid #ddd; padding: 10px; margin-bottom: 10px; }
-        input, button { width: 100%; padding: 12px; margin: 5px 0; box-sizing: border-box; border: 1px solid #ddd; border-radius: 8px; }
-        button { background: #007bff; color: white; border: none; font-weight: bold; cursor: pointer; }
-        .profile-img { width: 80px; height: 80px; border-radius: 50%; cursor: pointer; object-fit: cover; border: 2px solid #eee; }
+        body { font-family: sans-serif; background: #f4f7f6; margin: 0; padding: 10px; }
+        .container { max-width: 500px; margin: 0 auto; background: white; padding: 15px; border-radius: 15px; }
+        input, button { width: 100%; padding: 10px; margin: 5px 0; border: 1px solid #ddd; border-radius: 8px; }
+        #chat-area { display: none; }
+        .msg { border-bottom: 1px solid #eee; padding: 5px; }
     </style>
 </head>
 <body>
 
 <div id="lobby" class="container">
-    <h2>프로필 설정</h2>
-    <img id="my-img" src="https://via.placeholder.com/80" class="profile-img" onclick="document.getElementById('img-input').click()">
-    <input type="file" id="img-input" hidden onchange="previewImg(event)">
-    <input id="my-nick" placeholder="닉네임">
-    <button onclick="saveProfile()">저장/수정</button>
-    <hr>
-    <h3>채팅방 만들기</h3>
+    <h2>닉네임: <input id="my-nick"></h2>
     <input id="new-room" placeholder="방 이름">
-    <input id="new-pwd" placeholder="비밀번호(설정 시에만)">
+    <input id="new-pwd" placeholder="비밀번호(선택)">
     <button onclick="createRoom()">방 생성</button>
     <div id="room-list"></div>
 </div>
 
 <div id="chat-area" class="container">
-    <button onclick="location.reload()" style="background:#6c757d;">방 나가기</button>
-    <div id="messages"></div>
+    <button onclick="location.reload()">방 나가기</button>
+    <div id="announcement" style="background:#fff3cd; padding:10px;">공지 없음</div>
+    <div id="poll-area"></div>
+    <div id="messages" style="height:200px; overflow-y:scroll;"></div>
+    
+    <div id="admin-controls" style="display:none; border:1px dashed blue; padding:10px;">
+        <input id="ann-input" placeholder="공지/투표 내용">
+        <button onclick="postAnnouncement()">공지 등록</button>
+    </div>
+
+    <input type="file" id="media-input" accept="image/*,video/*" onchange="sendMedia(event)">
     <input id="msg-input" placeholder="메시지 입력">
     <button onclick="sendMessage()">전송</button>
 </div>
@@ -40,70 +41,58 @@
 <script src="/socket.io/socket.io.js"></script>
 <script>
     const socket = io();
-    let myData = JSON.parse(localStorage.getItem('user')) || {nick: '', img: ''};
-    let currentRoom = '';
-
-    // 프로필 로드
-    if(myData.nick) { document.getElementById('my-nick').value = myData.nick; if(myData.img) document.getElementById('my-img').src = myData.img; }
-
-    function saveProfile() {
-        myData.nick = document.getElementById('my-nick').value;
-        localStorage.setItem('user', JSON.stringify(myData));
-        alert('저장되었습니다.');
-    }
-
-    function previewImg(e) {
-        const reader = new FileReader();
-        reader.onload = (ev) => { myData.img = ev.target.result; document.getElementById('my-img').src = ev.target.result; };
-        reader.readAsDataURL(e.target.files[0]);
-    }
+    let myName = "", currentRoom = "", isCreator = false;
 
     function createRoom() {
-        socket.emit('createRoom', { 
-            roomName: document.getElementById('new-room').value, 
-            password: document.getElementById('new-pwd').value 
-        });
+        myName = document.getElementById('my-nick').value;
+        socket.emit('createRoom', { roomName: document.getElementById('new-room').value, password: document.getElementById('new-pwd').value, creator: myName });
+    }
+
+    function join(roomName, creator, pwd) {
+        if(pwd) { const p = prompt("비밀번호:"); if(p !== pwd) return alert("틀림"); }
+        myName = document.getElementById('my-nick').value;
+        currentRoom = roomName;
+        isCreator = (myName === creator);
+        socket.emit('joinRoom', { roomName, nickname: myName });
+        document.getElementById('lobby').style.display = 'none';
+        document.getElementById('chat-area').style.display = 'block';
+        if(isCreator) document.getElementById('admin-controls').style.display = 'block';
     }
 
     socket.on('updateRooms', (rooms) => {
-        document.getElementById('room-list').innerHTML = rooms.map(r => `
-            <div style="margin-top:10px;">
-                ${r.roomName} ${r.password ? '🔒' : ''}
-                <button onclick="join('${r.roomName}', '${r.password || ''}')">입장</button>
-            </div>
-        `).join('');
+        document.getElementById('room-list').innerHTML = rooms.map(r => `<div>${r.roomName} <button onclick="join('${r.roomName}', '${r.creator}', '${r.password}')">입장</button></div>`).join('');
     });
 
-    // [개선된 입장 로직]
-    function join(room, password) {
-        // password가 존재하고 빈 문자열이 아닐 때만 비밀번호 창을 띄움
-        if (password && password.trim() !== "") {
-            const input = prompt("비밀번호를 입력하세요:");
-            if (input !== password) {
-                alert("비밀번호가 틀렸습니다.");
-                return;
-            }
-        }
-        
-        // 비밀번호가 없거나 일치하면 바로 입장
-        currentRoom = room;
-        socket.emit('joinRoom', { roomName: room, nickname: myData.nick });
-        document.getElementById('lobby').style.display = 'none';
-        document.getElementById('chat-area').style.display = 'flex';
+    function sendMessage() {
+        socket.emit('chat', { room: currentRoom, sender: myName, text: document.getElementById('msg-input').value });
     }
 
-    function sendMessage() {
-        socket.emit('chat', { room: currentRoom, sender: myData.nick, text: document.getElementById('msg-input').value });
-        document.getElementById('msg-input').value = '';
+    function sendMedia(e) {
+        const reader = new FileReader();
+        reader.onload = (ev) => socket.emit('chat', { room: currentRoom, sender: myName, text: ev.target.result, isMedia: true });
+        reader.readAsDataURL(e.target.files[0]);
+    }
+
+    function postAnnouncement() {
+        const text = document.getElementById('ann-input').value;
+        socket.emit('postAnnouncement', { roomName: currentRoom, admin: myName, text: text, poll: { question: text, options: ['O', 'X'], votes: {} } });
     }
 
     socket.on('chat', (msg) => {
         const div = document.createElement('div');
         div.className = 'msg';
-        div.innerHTML = `<strong>${msg.sender}</strong>: ${msg.text}`;
+        div.innerHTML = msg.isMedia ? `<img src="${msg.text}" width="100">` : `<strong>${msg.sender}</strong>: ${msg.text}`;
         document.getElementById('messages').appendChild(div);
-        document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
     });
+
+    socket.on('refreshRoom', (room) => {
+        document.getElementById('announcement').innerText = room.announcement || "공지 없음";
+        if(room.poll) {
+            document.getElementById('poll-area').innerHTML = `<h3>${room.poll.question}</h3>` + room.poll.options.map(o => `<button onclick="vote('${o}')">${o}</button>`).join('');
+        }
+    });
+    
+    function vote(opt) { socket.emit('vote', { roomName: currentRoom, option: opt }); }
 </script>
 </body>
 </html>
