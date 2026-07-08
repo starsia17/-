@@ -1,72 +1,102 @@
 <!DOCTYPE html>
-<html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
+    <title>Family Talk</title>
+    <style>
+        /* 모바일 친화적인 디자인 */
+        body { font-family: 'Arial', sans-serif; margin: 0; padding: 15px; box-sizing: border-box; }
+        input { width: 100%; padding: 12px; margin: 8px 0; box-sizing: border-box; border: 1px solid #ccc; border-radius: 5px; }
+        button { width: 100%; padding: 12px; background: #007bff; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer; }
+        ul { list-style: none; padding: 0; }
+        li { padding: 15px; border-bottom: 1px solid #eee; font-size: 18px; cursor: pointer; }
+        #chat-room { display: none; } /* 처음엔 숨김 */
+        #messages { height: 300px; overflow-y: scroll; border: 1px solid #ddd; padding: 10px; }
+    </style>
+</head>
 <body>
-  <div id="lobby">
-    <input id="nickname" placeholder="닉네임 입력">
-    <input id="roomName" placeholder="방 이름 입력">
-    <button onclick="createRoom()">방 만들기</button>
-    <h3>방 목록</h3>
-    <ul id="room-list"></ul>
-  </div>
 
-  <div id="chat-room" style="display:none;">
-    <h3 id="current-room-name"></h3>
-    <ul id="messages"></ul>
-    <form id="form">
-      <input id="input" autocomplete="off" /><button>전송</button>
-    </form>
-  </div>
+    <div id="lobby">
+        <h2>채팅 로비</h2>
+        <input id="nickname" placeholder="닉네임 입력 (필수)">
+        <input id="roomName" placeholder="방 이름 입력">
+        <button onclick="createRoom()">새 채팅방 만들기</button>
+        <h3>방 목록</h3>
+        <ul id="room-list"></ul>
+    </div>
 
-  <script src="/socket.io/socket.io.js"></script>
-  <script>
-    const socket = io();
-    let currentRoom = "";
+    <div id="chat-room">
+        <h3 id="current-room-name"></h3>
+        <ul id="messages"></ul>
+        <form id="form">
+            <input id="input" autocomplete="off" placeholder="메시지 입력..." />
+            <button>전송</button>
+        </form>
+    </div>
 
-    // [방 만들기] 서버로 방 생성 요청
-    function createRoom() {
-      const nickname = document.getElementById('nickname').value;
-      const roomName = document.getElementById('roomName').value;
-      if (nickname && roomName) {
-        socket.emit('createRoom', { roomName, nickname });
-      }
-    }
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        let currentRoom = "";
 
-    // [방 목록 업데이트] 서버에서 새 방 알림을 받음
-    socket.on('roomCreated', (room) => {
-      const roomList = document.getElementById('room-list');
-      const li = document.createElement('li');
-      li.textContent = room.roomName + " (방장: " + room.creator + ")";
-      li.onclick = () => joinRoom(room.roomName);
-      roomList.appendChild(li);
-    });
+        // [방 만들기]
+        function createRoom() {
+            const nickname = document.getElementById('nickname').value;
+            const roomName = document.getElementById('roomName').value;
+            if (!nickname) return alert("닉네임을 입력하세요!");
+            if (!roomName) return alert("방 이름을 입력하세요!");
+            socket.emit('createRoom', { roomName, nickname });
+        }
 
-    // [방 입장]
-    function joinRoom(roomName) {
-      currentRoom = roomName;
-      socket.emit('joinRoom', roomName);
-      document.getElementById('lobby').style.display = 'none';
-      document.getElementById('chat-room').style.display = 'block';
-      document.getElementById('current-room-name').textContent = roomName + " 채팅방";
-    }
+        // [서버에서 방 목록 받기]
+        socket.on('initialRooms', (rooms) => {
+            const roomList = document.getElementById('room-list');
+            roomList.innerHTML = '';
+            rooms.forEach(room => addRoomToList(room));
+        });
 
-    // [메시지 보내기] room 정보와 함께 보냄
-    const form = document.getElementById('form');
-    const input = document.getElementById('input');
-    form.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const nickname = document.getElementById('nickname').value;
-      if (input.value) {
-        socket.emit('chat message', { room: currentRoom, text: input.value, username: nickname });
-        input.value = '';
-      }
-    });
+        // [새 방 생성 알림]
+        socket.on('roomCreated', (room) => {
+            addRoomToList(room);
+        });
 
-    // [메시지 수신]
-    socket.on('chat message', (msg) => {
-      const item = document.createElement('li');
-      item.textContent = msg.username + ": " + msg.text;
-      document.getElementById('messages').appendChild(item);
-    });
-  </script>
+        // [방 목록 그리기]
+        function addRoomToList(room) {
+            const roomList = document.getElementById('room-list');
+            const li = document.createElement('li');
+            li.textContent = `${room.roomName} (방장: ${room.creator})`;
+            li.onclick = () => joinRoom(room.roomName);
+            roomList.appendChild(li);
+        }
+
+        // [방 입장]
+        function joinRoom(roomName) {
+            currentRoom = roomName;
+            socket.emit('joinRoom', roomName);
+            document.getElementById('lobby').style.display = 'none';
+            document.getElementById('chat-room').style.display = 'block';
+            document.getElementById('current-room-name').textContent = roomName + " 채팅방";
+        }
+
+        // [메시지 전송]
+        const form = document.getElementById('form');
+        const input = document.getElementById('input');
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const nickname = document.getElementById('nickname').value;
+            if (input.value) {
+                socket.emit('chat message', { room: currentRoom, text: input.value, username: nickname });
+                input.value = '';
+            }
+        });
+
+        // [메시지 수신]
+        socket.on('chat message', (msg) => {
+            const item = document.createElement('li');
+            item.textContent = `${msg.username}: ${msg.text}`;
+            document.getElementById('messages').appendChild(item);
+        });
+    </script>
 </body>
 </html>
