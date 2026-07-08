@@ -2,94 +2,115 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Family Talk</title>
     <style>
-        body { font-family: sans-serif; padding: 10px; }
-        .profile-img { width: 60px; height: 60px; border-radius: 50%; cursor: pointer; }
-        .modal { display: none; position: fixed; top: 20%; left: 10%; width: 80%; padding: 20px; background: white; border: 1px solid #ccc; }
+        body { font-family: sans-serif; background: #f4f7f6; margin: 0; padding: 20px; }
+        .container { max-width: 500px; margin: 0 auto; background: white; padding: 20px; border-radius: 15px; }
+        img { width: 80px; height: 80px; border-radius: 50%; object-fit: cover; }
+        input { width: 100%; padding: 10px; margin: 5px 0; box-sizing: border-box; }
+        button { width: 100%; padding: 10px; background: #007bff; color: white; border: none; cursor: pointer; }
+        .room-item { border-bottom: 1px solid #eee; padding: 10px; display: flex; justify-content: space-between; }
     </style>
 </head>
 <body>
 
-    <div id="lobby">
-        <img id="my-profile" class="profile-img" src="default.png" onclick="document.getElementById('profileInput').click()">
-        <input type="file" id="profileInput" hidden onchange="setProfile(event)">
-        <input id="nickname" placeholder="닉네임">
-        <button onclick="login()">접속</button>
-        <div id="friend-list"><h3>친구 목록</h3><ul id="friends"></ul></div>
-    </div>
+<div class="container" id="lobby">
+    <h2>Family Talk</h2>
+    <img id="my-img" src="https://via.placeholder.com/80" onclick="document.getElementById('img-input').click()">
+    <input type="file" id="img-input" hidden onchange="previewImg(event)">
+    <input id="my-nick" placeholder="닉네임">
+    <button id="save-btn" onclick="saveProfile()">프로필 저장</button>
+    <button id="edit-btn" onclick="editProfile()" style="display:none; background:#6c757d;">수정하기</button>
 
-    <div id="chat-room" style="display:none;">
-        <h3 id="room-title"></h3>
-        <ul id="messages"></ul>
-        <input type="file" id="mediaInput" accept="image/*,video/*" onchange="sendMedia(event)">
-        <input id="chatInput">
-        <button onclick="sendMessage()">전송</button>
-    </div>
+    <hr>
+    <input id="new-room" placeholder="방 이름">
+    <input id="new-pwd" type="password" placeholder="비밀번호(선택)">
+    <button onclick="createRoom()" style="background:#28a745;">방 만들기</button>
+    
+    <h3>채팅방 목록</h3>
+    <div id="room-list"></div>
+</div>
 
-    <div id="profile-modal" class="modal">
-        <img id="modal-img" width="100">
-        <h2 id="modal-name"></h2>
-        <button onclick="addFriend()">친구 추가</button>
-        <button onclick="document.getElementById('profile-modal').style.display='none'">닫기</button>
-    </div>
+<div class="container" id="chat-room" style="display:none;">
+    <button onclick="location.reload()">방 나가기</button>
+    <ul id="messages"></ul>
+    <input id="chat-input" placeholder="메시지">
+    <button onclick="sendMessage()">전송</button>
+</div>
 
-    <script src="/socket.io/socket.io.js"></script>
-    <script>
-        const socket = io();
-        let myData = JSON.parse(localStorage.getItem('user')) || {nickname: '', profilePic: ''};
+<script src="/socket.io/socket.io.js"></script>
+<script>
+    const socket = io();
+    let myProfile = JSON.parse(localStorage.getItem('user')) || {nick: '', img: ''};
 
-        // 로컬 데이터 로드
-        window.onload = () => {
-            if(myData.nickname) document.getElementById('nickname').value = myData.nickname;
-        };
+    // [초기 설정] 프로필 불러오기
+    if(myProfile.nick) {
+        document.getElementById('my-nick').value = myProfile.nick;
+        document.getElementById('my-nick').disabled = true;
+        document.getElementById('my-img').src = myProfile.img;
+        document.getElementById('save-btn').style.display = 'none';
+        document.getElementById('edit-btn').style.display = 'block';
+    }
 
-        function setProfile(e) {
-            const reader = new FileReader();
-            reader.onload = (ev) => { myData.profilePic = ev.target.result; document.getElementById('my-profile').src = ev.target.result; };
-            reader.readAsDataURL(e.target.files[0]);
-        }
+    function saveProfile() {
+        myProfile.nick = document.getElementById('my-nick').value;
+        localStorage.setItem('user', JSON.stringify(myProfile));
+        socket.emit('saveProfile', {nickname: myProfile.nick, profilePic: myProfile.img});
+        location.reload();
+    }
 
-        function login() {
-            myData.nickname = document.getElementById('nickname').value;
-            localStorage.setItem('user', JSON.stringify(myData));
-            socket.emit('join', myData);
+    function editProfile() {
+        document.getElementById('my-nick').disabled = false;
+        document.getElementById('save-btn').style.display = 'block';
+        document.getElementById('edit-btn').style.display = 'none';
+    }
+
+    function previewImg(e) {
+        const reader = new FileReader();
+        reader.onload = (ev) => { myProfile.img = ev.target.result; document.getElementById('my-img').src = ev.target.result; };
+        reader.readAsDataURL(e.target.files[0]);
+    }
+
+    function createRoom() {
+        socket.emit('createRoom', { 
+            roomName: document.getElementById('new-room').value, 
+            password: document.getElementById('new-pwd').value,
+            creator: myProfile.nick 
+        });
+    }
+
+    socket.on('updateRoomList', (rooms) => {
+        document.getElementById('room-list').innerHTML = rooms.map(r => `
+            <div class="room-item">
+                <span>${r.roomName} ${r.password ? '🔒' : ''}</span>
+                <button onclick="joinRoom('${r.roomName}', '${r.password}')">입장</button>
+            </div>
+        `).join('');
+    });
+
+    function joinRoom(room, pwd) {
+        const input = prompt("비밀번호 입력:");
+        if(input === pwd || !pwd) {
+            socket.emit('joinRoom', { roomName: room, nickname: myProfile.nick });
             document.getElementById('lobby').style.display = 'none';
             document.getElementById('chat-room').style.display = 'block';
-        }
+        } else { alert("비밀번호 틀림"); }
+    }
 
-        // 미디어 전송 (사진/영상 구분)
-        function sendMedia(e) {
-            const file = e.target.files[0];
-            const reader = new FileReader();
-            reader.onload = (ev) => {
-                socket.emit('chat message', {
-                    room: 'General',
-                    username: myData.nickname,
-                    text: ev.target.result,
-                    isMedia: true,
-                    isVideo: file.type.startsWith('video')
-                });
-            };
-            reader.readAsDataURL(file);
-        }
-
-        // 메시지 수신 처리
-        socket.on('chat message', (msg) => {
-            const li = document.createElement('li');
-            li.innerHTML = msg.isMedia ? 
-                (msg.isVideo ? `<strong>${msg.username}</strong>: <video src="${msg.text}" width="200" controls></video>` 
-                             : `<strong>${msg.username}</strong>: <img src="${msg.text}" width="200">`)
-                : `<strong>${msg.username}</strong>: ${msg.text}`;
-            document.getElementById('messages').appendChild(li);
+    function sendMessage() {
+        socket.emit('chat message', { 
+            room: 'General', // 실제 구현 시 현재 접속 중인 방 이름으로 변경
+            username: myProfile.nick, 
+            text: document.getElementById('chat-input').value 
         });
+    }
 
-        socket.on('system', (msg) => alert(msg));
-        socket.on('friendAlert', (data) => {
-            if(confirm(`${data.sender}님으로부터 친구 요청이 왔습니다. 수락할까요?`)) {
-                socket.emit('acceptFriend', { myNickname: myData.nickname, friendNickname: data.sender });
-            }
-        });
-    </script>
+    socket.on('chat message', (msg) => {
+        const li = document.createElement('li');
+        li.innerText = `${msg.username}: ${msg.text}`;
+        document.getElementById('messages').appendChild(li);
+    });
+</script>
 </body>
 </html>
