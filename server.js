@@ -4,10 +4,12 @@ const http = require('http').createServer(app);
 const io = require('socket.io')(http);
 const mongoose = require('mongoose');
 
+// DB 연결
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('DB 연결 성공'))
   .catch(err => console.error('DB 연결 실패:', err));
 
+// 모델 정의
 const Room = mongoose.model('Room', new mongoose.Schema({
     roomName: String,
     creator: String,
@@ -27,8 +29,18 @@ const Message = mongoose.model('Message', new mongoose.Schema({
 io.on('connection', (socket) => {
     Room.find().then(rooms => socket.emit('initialRooms', rooms));
 
+    // 방 만들기 (중복 방지 기능 포함)
     socket.on('createRoom', async (data) => {
-        const newRoom = new Room({ roomName: data.roomName, creator: data.nickname, password: data.password });
+        const existing = await Room.findOne({ roomName: data.roomName });
+        if (existing) {
+            socket.emit('error', '이미 존재하는 방 이름입니다.');
+            return;
+        }
+        const newRoom = new Room({ 
+            roomName: data.roomName, 
+            creator: data.nickname, 
+            password: data.password 
+        });
         await newRoom.save();
         io.emit('roomCreated', newRoom);
     });
@@ -39,11 +51,11 @@ io.on('connection', (socket) => {
             socket.join(data.roomName);
             socket.emit('joinResult', { success: true, roomData: room });
         } else {
-            socket.emit('joinResult', { success: false, message: '비밀번호 틀림' });
+            socket.emit('joinResult', { success: false, message: '비밀번호가 틀렸습니다.' });
         }
     });
 
-    // 공지사항 작성 (방장 확인)
+    // 관리 기능
     socket.on('setAnnouncement', async (data) => {
         const room = await Room.findOne({ roomName: data.roomName });
         if (room && room.creator === data.nickname) {
@@ -53,7 +65,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // 투표 생성 (방장 확인)
     socket.on('createPoll', async (data) => {
         const room = await Room.findOne({ roomName: data.roomName });
         if (room && room.creator === data.nickname) {
@@ -63,7 +74,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // 투표하기
     socket.on('vote', async (data) => {
         const room = await Room.findOne({ roomName: data.roomName });
         if (room && room.poll) {
