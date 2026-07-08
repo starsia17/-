@@ -1,17 +1,19 @@
 {
-  "name": "chatapp",
+  "name": "family-talk",
   "version": "1.0.0",
-  "description": "실시간 한국어 채팅 앱",
+  "description": "Family Talk Chat Application",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "nodemon server.js"
   },
   "dependencies": {
     "express": "^4.18.2",
-    "socket.io": "^4.6.1",
-    "mongoose": "^7.5.0",
+    "mongoose": "^7.6.0",
     "multer": "^1.4.5-lts.1",
-    "uuid": "^9.0.0"
+    "socket.io": "^4.7.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
   }
 }
