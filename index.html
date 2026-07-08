@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>패밀리톡</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body { margin: 0; font-family: sans-serif; background: #1e1e1e; color: white; display: flex; flex-direction: column; height: 100vh; }
+        #chat-window { flex: 1; overflow-y: auto; padding: 15px; }
+        .friend-item { padding: 10px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; }
+        .badge { font-size: 0.7rem; padding: 2px 5px; border-radius: 4px; margin-left: 5px; }
+        .new { background: #2ecc71; }
+        .change { background: #e67e22; }
+        #input-area { padding: 10px; background: #2d2d2d; display: flex; }
+        input { flex: 1; padding: 10px; border-radius: 5px; border: none; }
+        button { padding: 10px; background: #4e5ef3; color: white; border: none; border-radius: 5px; margin-left: 5px; }
+    </style>
+</head>
+<body>
+    <div id="friend-list"></div>
+    <div id="chat-window"></div>
+    <div id="input-area">
+        <input id="msg" placeholder="메시지 입력">
+        <button onclick="sendMessage()">전송</button>
+    </div>
+
+    <script>
+        const socket = io();
+        const now = Date.now();
+
+        function renderBadge(addedAt, updatedAt) {
+            if (now - new Date(addedAt).getTime() < 86400000) return '<span class="badge new">New</span>';
+            if (now - new Date(updatedAt).getTime() < 86400000) return '<span class="badge change">CHANGE</span>';
+            return '';
+        }
+
+        function sendMessage() {
+            const msg = document.getElementById('msg').value;
+            socket.emit('send_message', { text: msg });
+            document.getElementById('msg').value = '';
+        }
+
+        socket.on('receive_message', (data) => {
+            const div = document.createElement('div');
+            div.textContent = data.text;
+            document.getElementById('chat-window').appendChild(div);
+        });
+    </script>
+</body>
+</html>
