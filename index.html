@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <ul id="messages"></ul>
+  <form id="form">
+    <input id="input" autocomplete="off" /> <button>전송</button>
+  </form>
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const form = document.getElementById('form');
+    const input = document.getElementById('input');
+    
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (input.value) {
+        socket.emit('chat message', input.value);
+        input.value = '';
+      }
+    });
+
+    socket.on('chat message', (msg) => {
+      const item = document.createElement('li');
+      item.textContent = msg;
+      document.getElementById('messages').appendChild(item);
+    });
+  </script>
+</body>
+</html>
