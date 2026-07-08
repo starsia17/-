@@ -10,91 +10,60 @@ mongoose.connect(process.env.MONGODB_URI)
   .catch(err => console.error('DB 연결 실패:', err));
 
 // 모델 정의
+const User = mongoose.model('User', new mongoose.Schema({
+    nickname: { type: String, unique: true },
+    profilePic: String,
+    friends: [String],
+    pendingRequests: [String]
+}));
+
 const Room = mongoose.model('Room', new mongoose.Schema({
     roomName: String,
     creator: String,
-    password: { type: String, default: '' },
-    announcement: { type: String, default: '' },
-    poll: { question: String, options: [String], votes: [Number] }
+    password: { type: String, default: '' }
 }));
 
-const Message = mongoose.model('Message', new mongoose.Schema({
-    room: String,
-    username: String,
-    text: String,
-    isImage: { type: Boolean, default: false },
-    timestamp: { type: Date, default: Date.now }
-}));
+// 소켓 연결 관리
+const userSockets = {}; // { nickname: socketId }
 
 io.on('connection', (socket) => {
-    Room.find().then(rooms => socket.emit('initialRooms', rooms));
-
-    // 방 만들기 (중복 방지 기능 포함)
-    socket.on('createRoom', async (data) => {
-        const existing = await Room.findOne({ roomName: data.roomName });
-        if (existing) {
-            socket.emit('error', '이미 존재하는 방 이름입니다.');
-            return;
-        }
-        const newRoom = new Room({ 
-            roomName: data.roomName, 
-            creator: data.nickname, 
-            password: data.password 
-        });
-        await newRoom.save();
-        io.emit('roomCreated', newRoom);
+    // 닉네임/프로필 설정 및 접속 알림
+    socket.on('join', async (data) => {
+        userSockets[data.nickname] = socket.id;
+        let user = await User.findOne({ nickname: data.nickname });
+        if (!user) user = await new User({ nickname: data.nickname, profilePic: data.profilePic }).save();
+        socket.emit('initUser', user);
     });
 
-    socket.on('joinRoom', async (data) => {
-        const room = await Room.findOne({ roomName: data.roomName });
-        if (room && (!room.password || room.password === data.password)) {
-            socket.join(data.roomName);
-            socket.emit('joinResult', { success: true, roomData: room });
-        } else {
-            socket.emit('joinResult', { success: false, message: '비밀번호가 틀렸습니다.' });
+    // 친구 신청
+    socket.on('friendRequest', async (data) => {
+        const target = await User.findOne({ nickname: data.target });
+        if (target && !target.pendingRequests.includes(data.sender)) {
+            target.pendingRequests.push(data.sender);
+            await target.save();
+            io.to(userSockets[data.target]).emit('friendAlert', { sender: data.sender });
         }
     });
 
-    // 관리 기능
-    socket.on('setAnnouncement', async (data) => {
-        const room = await Room.findOne({ roomName: data.roomName });
-        if (room && room.creator === data.nickname) {
-            room.announcement = data.text;
-            await room.save();
-            io.to(data.roomName).emit('updateAnnouncement', data.text);
-        }
+    // 친구 수락
+    socket.on('acceptFriend', async (data) => {
+        const user = await User.findOne({ nickname: data.myNickname });
+        const friend = await User.findOne({ nickname: data.friendNickname });
+        user.friends.push(data.friendNickname);
+        user.pendingRequests = user.pendingRequests.filter(n => n !== data.friendNickname);
+        friend.friends.push(data.myNickname);
+        await user.save(); await friend.save();
+        io.to(userSockets[data.friendNickname]).emit('friendAccepted', data.myNickname);
     });
 
-    socket.on('createPoll', async (data) => {
-        const room = await Room.findOne({ roomName: data.roomName });
-        if (room && room.creator === data.nickname) {
-            room.poll = { question: data.question, options: data.options, votes: new Array(data.options.length).fill(0) };
-            await room.save();
-            io.to(data.roomName).emit('updatePoll', room.poll);
-        }
-    });
-
-    socket.on('vote', async (data) => {
-        const room = await Room.findOne({ roomName: data.roomName });
-        if (room && room.poll) {
-            room.poll.votes[data.optionIndex]++;
-            await room.save();
-            io.to(data.roomName).emit('updatePoll', room.poll);
-        }
-    });
-
-    socket.on('chat message', async (msg) => {
-        const newMessage = new Message({ room: msg.room, username: msg.username, text: msg.text, isImage: msg.isImage });
-        await newMessage.save();
+    // 채팅 및 파일 전송
+    socket.on('chat message', (msg) => {
         io.to(msg.room).emit('chat message', msg);
     });
 
-    socket.on('deleteRoom', async (data) => {
-        const room = await Room.findOne({ roomName: data.roomName });
-        if (room && room.creator === data.nickname) {
-            await Room.deleteOne({ roomName: data.roomName });
-            io.emit('roomDeleted', data.roomName);
-        }
+    socket.on('joinRoom', (data) => {
+        socket.join(data.roomName);
+        io.to(data.roomName).emit('system', `${data.nickname}님이 입장했습니다.`);
     });
 });
 
