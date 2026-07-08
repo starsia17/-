@@ -2,114 +2,107 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Family Talk</title>
     <style>
-        body { font-family: sans-serif; background: #f4f7f6; margin: 0; padding: 20px; }
-        .container { max-width: 500px; margin: 0 auto; background: white; padding: 20px; border-radius: 15px; }
-        img { width: 80px; height: 80px; border-radius: 50%; object-fit: cover; }
-        input { width: 100%; padding: 10px; margin: 5px 0; box-sizing: border-box; }
-        button { width: 100%; padding: 10px; background: #007bff; color: white; border: none; cursor: pointer; }
-        .room-item { border-bottom: 1px solid #eee; padding: 10px; display: flex; justify-content: space-between; }
+        body { font-family: sans-serif; margin: 0; background: #f4f7f6; padding: 10px; }
+        .container { max-width: 500px; margin: 0 auto; background: white; padding: 20px; border-radius: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        #chat-area { display: none; height: 90vh; flex-direction: column; }
+        #messages { flex: 1; overflow-y: auto; border: 1px solid #ddd; padding: 10px; margin-bottom: 10px; }
+        input, button { width: 100%; padding: 12px; margin: 5px 0; box-sizing: border-box; border: 1px solid #ddd; border-radius: 8px; }
+        button { background: #007bff; color: white; border: none; font-weight: bold; cursor: pointer; }
+        .profile-img { width: 80px; height: 80px; border-radius: 50%; cursor: pointer; object-fit: cover; border: 2px solid #eee; }
     </style>
 </head>
 <body>
 
-<div class="container" id="lobby">
-    <h2>Family Talk</h2>
-    <img id="my-img" src="https://via.placeholder.com/80" onclick="document.getElementById('img-input').click()">
+<div id="lobby" class="container">
+    <h2>프로필 설정</h2>
+    <img id="my-img" src="https://via.placeholder.com/80" class="profile-img" onclick="document.getElementById('img-input').click()">
     <input type="file" id="img-input" hidden onchange="previewImg(event)">
     <input id="my-nick" placeholder="닉네임">
-    <button id="save-btn" onclick="saveProfile()">프로필 저장</button>
-    <button id="edit-btn" onclick="editProfile()" style="display:none; background:#6c757d;">수정하기</button>
-
+    <button onclick="saveProfile()">저장/수정</button>
     <hr>
+    <h3>채팅방 만들기</h3>
     <input id="new-room" placeholder="방 이름">
-    <input id="new-pwd" type="password" placeholder="비밀번호(선택)">
-    <button onclick="createRoom()" style="background:#28a745;">방 만들기</button>
-    
-    <h3>채팅방 목록</h3>
+    <input id="new-pwd" placeholder="비밀번호(설정 시에만)">
+    <button onclick="createRoom()">방 생성</button>
     <div id="room-list"></div>
 </div>
 
-<div class="container" id="chat-room" style="display:none;">
-    <button onclick="location.reload()">방 나가기</button>
-    <ul id="messages"></ul>
-    <input id="chat-input" placeholder="메시지">
+<div id="chat-area" class="container">
+    <button onclick="location.reload()" style="background:#6c757d;">방 나가기</button>
+    <div id="messages"></div>
+    <input id="msg-input" placeholder="메시지 입력">
     <button onclick="sendMessage()">전송</button>
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
     const socket = io();
-    let myProfile = JSON.parse(localStorage.getItem('user')) || {nick: '', img: ''};
+    let myData = JSON.parse(localStorage.getItem('user')) || {nick: '', img: ''};
+    let currentRoom = '';
 
-    // [초기 설정] 프로필 불러오기
-    if(myProfile.nick) {
-        document.getElementById('my-nick').value = myProfile.nick;
-        document.getElementById('my-nick').disabled = true;
-        document.getElementById('my-img').src = myProfile.img;
-        document.getElementById('save-btn').style.display = 'none';
-        document.getElementById('edit-btn').style.display = 'block';
-    }
+    // 프로필 로드
+    if(myData.nick) { document.getElementById('my-nick').value = myData.nick; if(myData.img) document.getElementById('my-img').src = myData.img; }
 
     function saveProfile() {
-        myProfile.nick = document.getElementById('my-nick').value;
-        localStorage.setItem('user', JSON.stringify(myProfile));
-        socket.emit('saveProfile', {nickname: myProfile.nick, profilePic: myProfile.img});
-        location.reload();
-    }
-
-    function editProfile() {
-        document.getElementById('my-nick').disabled = false;
-        document.getElementById('save-btn').style.display = 'block';
-        document.getElementById('edit-btn').style.display = 'none';
+        myData.nick = document.getElementById('my-nick').value;
+        localStorage.setItem('user', JSON.stringify(myData));
+        alert('저장되었습니다.');
     }
 
     function previewImg(e) {
         const reader = new FileReader();
-        reader.onload = (ev) => { myProfile.img = ev.target.result; document.getElementById('my-img').src = ev.target.result; };
+        reader.onload = (ev) => { myData.img = ev.target.result; document.getElementById('my-img').src = ev.target.result; };
         reader.readAsDataURL(e.target.files[0]);
     }
 
     function createRoom() {
         socket.emit('createRoom', { 
             roomName: document.getElementById('new-room').value, 
-            password: document.getElementById('new-pwd').value,
-            creator: myProfile.nick 
+            password: document.getElementById('new-pwd').value 
         });
     }
 
-    socket.on('updateRoomList', (rooms) => {
+    socket.on('updateRooms', (rooms) => {
         document.getElementById('room-list').innerHTML = rooms.map(r => `
-            <div class="room-item">
-                <span>${r.roomName} ${r.password ? '🔒' : ''}</span>
-                <button onclick="joinRoom('${r.roomName}', '${r.password}')">입장</button>
+            <div style="margin-top:10px;">
+                ${r.roomName} ${r.password ? '🔒' : ''}
+                <button onclick="join('${r.roomName}', '${r.password || ''}')">입장</button>
             </div>
         `).join('');
     });
 
-    function joinRoom(room, pwd) {
-        const input = prompt("비밀번호 입력:");
-        if(input === pwd || !pwd) {
-            socket.emit('joinRoom', { roomName: room, nickname: myProfile.nick });
-            document.getElementById('lobby').style.display = 'none';
-            document.getElementById('chat-room').style.display = 'block';
-        } else { alert("비밀번호 틀림"); }
+    // [개선된 입장 로직]
+    function join(room, password) {
+        // password가 존재하고 빈 문자열이 아닐 때만 비밀번호 창을 띄움
+        if (password && password.trim() !== "") {
+            const input = prompt("비밀번호를 입력하세요:");
+            if (input !== password) {
+                alert("비밀번호가 틀렸습니다.");
+                return;
+            }
+        }
+        
+        // 비밀번호가 없거나 일치하면 바로 입장
+        currentRoom = room;
+        socket.emit('joinRoom', { roomName: room, nickname: myData.nick });
+        document.getElementById('lobby').style.display = 'none';
+        document.getElementById('chat-area').style.display = 'flex';
     }
 
     function sendMessage() {
-        socket.emit('chat message', { 
-            room: 'General', // 실제 구현 시 현재 접속 중인 방 이름으로 변경
-            username: myProfile.nick, 
-            text: document.getElementById('chat-input').value 
-        });
+        socket.emit('chat', { room: currentRoom, sender: myData.nick, text: document.getElementById('msg-input').value });
+        document.getElementById('msg-input').value = '';
     }
 
-    socket.on('chat message', (msg) => {
-        const li = document.createElement('li');
-        li.innerText = `${msg.username}: ${msg.text}`;
-        document.getElementById('messages').appendChild(li);
+    socket.on('chat', (msg) => {
+        const div = document.createElement('div');
+        div.className = 'msg';
+        div.innerHTML = `<strong>${msg.sender}</strong>: ${msg.text}`;
+        document.getElementById('messages').appendChild(div);
+        document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
     });
 </script>
 </body>
