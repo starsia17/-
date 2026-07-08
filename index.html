@@ -7,13 +7,13 @@
     <style>
         body { font-family: sans-serif; margin: 0; padding: 15px; box-sizing: border-box; }
         input { width: 100%; padding: 10px; margin: 5px 0; border: 1px solid #ccc; }
-        /* 플레이스홀더 색상을 더 연하게 조절 */
-        input::placeholder { color: #cccccc; } 
-        button { width: 100%; padding: 10px; background: #007bff; color: white; border: none; margin-top: 5px; }
+        input::placeholder { color: #cccccc; } /* 플레이스홀더 옅은 색 */
+        button { width: 100%; padding: 10px; background: #007bff; color: white; border: none; margin-top: 5px; cursor: pointer; }
         #admin-menu { border: 1px solid #eee; padding: 10px; background: #f9f9f9; display: none; }
         #announcement-box { background: #ffeb3b; padding: 10px; margin-bottom: 10px; display: none; }
         #poll-box { border: 2px solid #2196f3; padding: 10px; margin-bottom: 10px; display: none; }
-        #messages { height: 250px; overflow-y: scroll; border: 1px solid #ddd; padding: 10px; }
+        #messages { height: 250px; overflow-y: scroll; border: 1px solid #ddd; padding: 10px; list-style: none; }
+        #messages li { padding: 5px; border-bottom: 1px solid #eee; }
     </style>
 </head>
 <body>
@@ -40,7 +40,7 @@
         </div>
 
         <button onclick="leaveRoom()" style="background:#6c757d;">뒤로 가기</button>
-        <button id="delete-btn" onclick="deleteRoom()" style="background:red;">방 삭제(방장)</button>
+        <button id="delete-btn" onclick="deleteRoom()" style="background:red;">방 삭제(방장만)</button>
         
         <ul id="messages"></ul>
         <form id="form">
@@ -64,6 +64,8 @@
             socket.emit('createRoom', { roomName, nickname, password });
         }
 
+        socket.on('error', (msg) => alert(msg));
+
         function joinRoom(roomName, creator, passwordExists) {
             const myNickname = document.getElementById('nickname').value;
             if(!myNickname) return alert("먼저 닉네임을 입력하세요.");
@@ -82,9 +84,8 @@
             } else alert(data.message);
         });
 
-        function sendAnnouncement() {
-            socket.emit('setAnnouncement', { roomName: currentRoom, text: document.getElementById('new-announce').value, nickname: document.getElementById('nickname').value });
-        }
+        // 기능 로직
+        function sendAnnouncement() { socket.emit('setAnnouncement', { roomName: currentRoom, text: document.getElementById('new-announce').value, nickname: document.getElementById('nickname').value }); }
         socket.on('updateAnnouncement', (text) => showAnnouncement(text));
         function showAnnouncement(text) {
             const box = document.getElementById('announcement-box');
@@ -92,15 +93,10 @@
             box.style.display = 'block';
         }
 
-        function createPoll() {
-            const q = document.getElementById('poll-question').value;
-            socket.emit('createPoll', { roomName: currentRoom, question: q, options: ["예", "아니오"], nickname: document.getElementById('nickname').value });
-        }
+        function createPoll() { socket.emit('createPoll', { roomName: currentRoom, question: document.getElementById('poll-question').value, options: ["예", "아니오"], nickname: document.getElementById('nickname').value }); }
         socket.on('updatePoll', (poll) => {
             const box = document.getElementById('poll-box');
-            box.innerHTML = `<strong>${poll.question}</strong><br>
-                <button onclick="vote(0)">예 (${poll.votes[0]})</button>
-                <button onclick="vote(1)">아니오 (${poll.votes[1]})</button>`;
+            box.innerHTML = `<strong>${poll.question}</strong><br><button onclick="vote(0)">예 (${poll.votes[0]})</button><button onclick="vote(1)">아니오 (${poll.votes[1]})</button>`;
             box.style.display = 'block';
         });
         function vote(idx) { socket.emit('vote', { roomName: currentRoom, optionIndex: idx }); }
