@@ -4,11 +4,19 @@ const http = require('http').createServer(app);
 const io = require('socket.io')(http);
 const mongoose = require('mongoose');
 
-// 데이터베이스 연결
-mongoose.connect(process.env.MONGODB_URI)
-  .then(() => console.log('데이터베이스 연결 성공!'))
-  .catch(err => console.error('연결 실패:', err));
+// DB 연결
+mongoose.connect(process.env.MONGODB_URI);
 
-app.get('/', (req, res) => res.send('서버 작동 중'));
+// 1. 화면(index.html) 보내주기
+app.get('/', (req, res) => {
+  res.sendFile(__dirname + '/index.html');
+});
+
+// 2. 채팅 주고받기
+io.on('connection', (socket) => {
+  socket.on('chat message', (msg) => {
+    io.emit('chat message', msg);
+  });
+});
 
 http.listen(process.env.PORT || 3000, () => console.log('서버 시작됨'));
