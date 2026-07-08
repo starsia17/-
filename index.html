@@ -5,17 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Family Talk</title>
     <style>
-        body { font-family: sans-serif; background: #f4f7f6; margin: 0; padding: 10px; }
+        body { font-family: sans-serif; background: #f4f7f6; padding: 10px; margin: 0; }
         .container { max-width: 500px; margin: 0 auto; background: white; padding: 15px; border-radius: 15px; }
-        input, button { width: 100%; padding: 10px; margin: 5px 0; border: 1px solid #ddd; border-radius: 8px; }
         #chat-area { display: none; }
         .msg { border-bottom: 1px solid #eee; padding: 5px; }
+        .admin-panel { border: 2px dashed #007bff; padding: 10px; margin: 10px 0; }
+        button { padding: 8px; margin: 3px; cursor: pointer; }
     </style>
 </head>
 <body>
 
 <div id="lobby" class="container">
-    <h2>닉네임: <input id="my-nick"></h2>
+    <h2>프로필 설정</h2>
+    <input id="my-nick" placeholder="닉네임">
+    <button onclick="register()">프로필 생성</button>
+    <hr>
+    <h3>채팅방 목록</h3>
     <input id="new-room" placeholder="방 이름">
     <input id="new-pwd" placeholder="비밀번호(선택)">
     <button onclick="createRoom()">방 생성</button>
@@ -26,15 +31,16 @@
     <button onclick="location.reload()">방 나가기</button>
     <div id="announcement" style="background:#fff3cd; padding:10px;">공지 없음</div>
     <div id="poll-area"></div>
-    <div id="messages" style="height:200px; overflow-y:scroll;"></div>
+    <div id="participants-list"></div>
+    <div id="messages" style="height:200px; overflow-y:scroll; border:1px solid #eee;"></div>
     
-    <div id="admin-controls" style="display:none; border:1px dashed blue; padding:10px;">
+    <div id="admin-controls" class="admin-panel" style="display:none;">
         <input id="ann-input" placeholder="공지/투표 내용">
         <button onclick="postAnnouncement()">공지 등록</button>
     </div>
 
     <input type="file" id="media-input" accept="image/*,video/*" onchange="sendMedia(event)">
-    <input id="msg-input" placeholder="메시지 입력">
+    <input id="msg-input" placeholder="메시지">
     <button onclick="sendMessage()">전송</button>
 </div>
 
@@ -43,14 +49,20 @@
     const socket = io();
     let myName = "", currentRoom = "", isCreator = false;
 
-    function createRoom() {
+    function register() {
         myName = document.getElementById('my-nick').value;
+        socket.emit('register', { nickname: myName });
+    }
+
+    socket.on('registered', () => alert('프로필 생성 완료!'));
+    socket.on('alert', (msg) => alert(msg));
+
+    function createRoom() {
         socket.emit('createRoom', { roomName: document.getElementById('new-room').value, password: document.getElementById('new-pwd').value, creator: myName });
     }
 
     function join(roomName, creator, pwd) {
-        if(pwd) { const p = prompt("비밀번호:"); if(p !== pwd) return alert("틀림"); }
-        myName = document.getElementById('my-nick').value;
+        if(pwd && prompt("비밀번호:") !== pwd) return alert("틀림");
         currentRoom = roomName;
         isCreator = (myName === creator);
         socket.emit('joinRoom', { roomName, nickname: myName });
@@ -61,6 +73,20 @@
 
     socket.on('updateRooms', (rooms) => {
         document.getElementById('room-list').innerHTML = rooms.map(r => `<div>${r.roomName} <button onclick="join('${r.roomName}', '${r.creator}', '${r.password}')">입장</button></div>`).join('');
+    });
+
+    socket.on('refreshRoom', (room) => {
+        document.getElementById('announcement').innerText = room.announcement || "공지 없음";
+        document.getElementById('participants-list').innerHTML = "참여자: " + room.participants.join(', ');
+        
+        if(room.poll) {
+            document.getElementById('poll-area').innerHTML = `<h3>${room.poll.question}</h3>` + 
+                room.poll.options.map(o => `<button onclick="vote('${o}')">${o} (${room.poll.votes[o] || 0})</button>`).join('');
+        }
+        
+        if(isCreator) {
+            document.getElementById('participants-list').innerHTML += "<br>강퇴: " + room.participants.map(p => `<button onclick="kick('${p}')">${p}</button>`).join('');
+        }
     });
 
     function sendMessage() {
@@ -78,6 +104,9 @@
         socket.emit('postAnnouncement', { roomName: currentRoom, admin: myName, text: text, poll: { question: text, options: ['O', 'X'], votes: {} } });
     }
 
+    function vote(opt) { socket.emit('vote', { roomName: currentRoom, option: opt }); }
+    function kick(target) { socket.emit('kickUser', { roomName: currentRoom, admin: myName, target: target }); }
+
     socket.on('chat', (msg) => {
         const div = document.createElement('div');
         div.className = 'msg';
@@ -85,14 +114,7 @@
         document.getElementById('messages').appendChild(div);
     });
 
-    socket.on('refreshRoom', (room) => {
-        document.getElementById('announcement').innerText = room.announcement || "공지 없음";
-        if(room.poll) {
-            document.getElementById('poll-area').innerHTML = `<h3>${room.poll.question}</h3>` + room.poll.options.map(o => `<button onclick="vote('${o}')">${o}</button>`).join('');
-        }
-    });
-    
-    function vote(opt) { socket.emit('vote', { roomName: currentRoom, option: opt }); }
+    socket.on('banned', (target) => { if(target === myName) { alert("강퇴되었습니다."); location.reload(); } });
 </script>
 </body>
 </html>
