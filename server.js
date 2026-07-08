@@ -5,7 +5,11 @@ const io = require('socket.io')(http);
 const mongoose = require('mongoose');
 
 // DB 연결
-mongoose.connect(process.env.MONGODB_URI);
+mongoose.connect(process.env.MONGODB_URI)
+  .then(() => console.log('데이터베이스 연결 성공!'))
+  .catch(err => {
+    console.error('★데이터베이스 연결 실패:', err.message);
+  });
 
 // 1. 화면(index.html) 보내주기
 app.get('/', (req, res) => {
