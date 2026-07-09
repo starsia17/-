@@ -1,10 +1,21 @@
 {
-  "name": "family-talk-mobile",
+  "name": "family-talk",
   "version": "1.0.0",
+  "description": "실시간 채팅 사이트",
   "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
-    "express": "^4.18.2",
-    "socket.io": "^4.7.2",
-    "mongoose": "^7.6.0"
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5",
+    "mongoose": "^8.4.0",
+    "multer": "^1.4.5-lts.1",
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.5",
+    "uuid": "^9.0.1"
   }
 }
