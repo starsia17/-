@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>채팅방 | Family Talk</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<div id="roomApp">
+
+  <!-- 채팅방 헤더 -->
+  <header class="room-header">
+    <button id="leaveRoomBtn" class="icon-btn">←</button>
+    <div class="room-header-title">
+      <h1 id="roomTitle">채팅방</h1>
+      <span id="memberCountTag">0명 참여중</span>
+    </div>
+    <button id="memberListOpenBtn" class="icon-btn">👥</button>
+  </header>
+
+  <!-- 공지사항 바 -->
+  <div id="noticeBar" class="notice-bar hidden">
+    <span class="notice-label">공지</span>
+    <span id="noticeText"></span>
+    <button id="noticeEditBtn" class="notice-edit hidden">수정</button>
+  </div>
+
+  <!-- 채팅 메세지 영역 -->
+  <main id="messageArea" class="message-area"></main>
+
+  <!-- 메세지 입력 영역 -->
+  <footer class="composer">
+    <button id="plusBtn" class="icon-btn plus-btn">＋</button>
+    <input type="file" id="fileInput" accept="image/*,video/*" class="hidden">
+    <input type="text" id="messageInput" placeholder="메세지를 입력하세요" autocomplete="off">
+    <button id="sendBtn" class="icon-btn send-btn">전송</button>
+  </footer>
+
+  <!-- +버튼 메뉴 (사진/동영상, 투표) -->
+  <div id="plusMenu" class="plus-menu hidden">
+    <button id="menuImageBtn">🖼️ 사진 / 동영상</button>
+    <button id="menuPollBtn">📊 투표 만들기</button>
+  </div>
+</div>
+
+<!-- 참여자 목록 패널 -->
+<div id="memberPanel" class="side-panel hidden">
+  <div class="side-panel-header">
+    <h3>참여자 목록</h3>
+    <button id="memberListCloseBtn" class="icon-btn">✕</button>
+  </div>
+  <div id="memberListBody" class="member-list-body"></div>
+</div>
+<div id="memberPanelOverlay" class="panel-overlay hidden"></div>
+
+<!-- 공지사항 작성 모달 (관리자 전용) -->
+<div id="noticeModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3>공지사항 작성</h3>
+    <textarea id="noticeInput" maxlength="300" placeholder="공지사항을 입력하세요"></textarea>
+    <div class="modal-actions">
+      <button id="noticeCancelBtn" class="btn-ghost">취소</button>
+      <button id="noticeSaveBtn" class="btn-primary">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- 투표 생성 모달 -->
+<div id="pollModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3>투표 만들기</h3>
+    <input type="text" id="pollQuestionInput" placeholder="투표 주제" maxlength="100">
+    <div id="pollOptionsWrap">
+      <input type="text" class="poll-option-input" placeholder="항목 1" maxlength="50">
+      <input type="text" class="poll-option-input" placeholder="항목 2" maxlength="50">
+    </div>
+    <button id="addPollOptionBtn" class="btn-ghost small">+ 항목 추가</button>
+    <div class="modal-actions">
+      <button id="pollCancelBtn" class="btn-ghost">취소</button>
+      <button id="pollSubmitBtn" class="btn-primary">등록</button>
+    </div>
+    <p id="pollError" class="error-text"></p>
+  </div>
+</div>
+
+<!-- 강퇴 확인 모달 -->
+<div id="kickConfirmModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3>강퇴하시겠습니까?</h3>
+    <p class="modal-sub" id="kickTargetName"></p>
+    <div class="modal-actions">
+      <button id="kickCancelBtn" class="btn-ghost">취소</button>
+      <button id="kickConfirmBtn" class="btn-danger">강퇴</button>
+    </div>
+  </div>
+</div>
+
+<!-- 이미지/동영상 확대보기 -->
+<div id="mediaViewer" class="media-viewer hidden">
+  <button id="mediaViewerCloseBtn" class="icon-btn">✕</button>
+  <div id="mediaViewerContent"></div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/room.js"></script>
+</body>
+</html>

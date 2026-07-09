@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Family Talk</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- 프로필 설정 화면 -->
+  <section id="profileScreen" class="screen">
+    <div class="brand">
+      <div class="brand-mark">FT</div>
+      <h1>Family Talk</h1>
+      <p class="sub">닉네임과 프로필 사진을 설정해주세요</p>
+    </div>
+
+    <div class="profile-card">
+      <label class="avatar-picker" for="avatarInput">
+        <img id="avatarPreview" src="" alt="" class="hidden">
+        <span id="avatarPlaceholder">＋</span>
+      </label>
+      <input type="file" id="avatarInput" accept="image/*" class="hidden">
+
+      <input type="text" id="nicknameInput" placeholder="닉네임 입력 (최대 20자)" maxlength="20">
+      <button id="saveProfileBtn" class="btn-primary">시작하기</button>
+      <p id="profileError" class="error-text"></p>
+    </div>
+  </section>
+
+  <!-- 메인 화면 (채팅방 목록) -->
+  <section id="mainScreen" class="screen hidden">
+    <header class="main-header">
+      <div class="me" id="myProfileTag">
+        <img id="myAvatar" src="" alt="" class="hidden">
+        <span id="myAvatarFallback">👤</span>
+        <span id="myNickname"></span>
+      </div>
+      <button id="createRoomOpenBtn" class="btn-primary small">+ 채팅방 만들기</button>
+    </header>
+
+    <div class="room-list-wrap">
+      <h2>채팅방 목록</h2>
+      <div id="roomList" class="room-list"></div>
+      <div id="emptyRooms" class="empty-state hidden">아직 만들어진 채팅방이 없어요.<br>첫 채팅방을 만들어보세요!</div>
+      <div id="pagination" class="pagination"></div>
+    </div>
+  </section>
+
+</div>
+
+<!-- 채팅방 생성 모달 -->
+<div id="createRoomModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3>채팅방 만들기</h3>
+    <input type="text" id="roomTitleInput" placeholder="채팅방 제목" maxlength="50">
+    <input type="password" id="roomPasswordInput" placeholder="비밀번호 (선택 사항)">
+    <div class="modal-actions">
+      <button id="createRoomCancelBtn" class="btn-ghost">취소</button>
+      <button id="createRoomSubmitBtn" class="btn-primary">생성</button>
+    </div>
+    <p id="createRoomError" class="error-text"></p>
+  </div>
+</div>
+
+<!-- 비밀번호 입력 모달 -->
+<div id="passwordModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3>비밀번호 입력</h3>
+    <p class="modal-sub" id="passwordRoomTitle"></p>
+    <input type="password" id="passwordInput" placeholder="비밀번호">
+    <div class="modal-actions">
+      <button id="passwordCancelBtn" class="btn-ghost">취소</button>
+      <button id="passwordSubmitBtn" class="btn-primary">입장</button>
+    </div>
+    <p id="passwordError" class="error-text"></p>
+  </div>
+</div>
+
+<script src="/js/main.js"></script>
+</body>
+</html>
