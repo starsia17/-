@@ -22,6 +22,7 @@ let selectedFiles = [];
 let objectUrls = [];
 let dialogPost = null;
 let dialogIndex = 0;
+let isAdmin = false;
 
 loadPosts();
 refreshAdminStatus();
@@ -30,13 +31,16 @@ async function refreshAdminStatus() {
   try {
     const response = await fetch('/api/admin/status');
     const status = await response.json();
+    isAdmin = status.authenticated;
     loginPanel.hidden = status.authenticated;
     postForm.hidden = !status.authenticated;
+    renderPosts();
     if (!status.configured) {
       document.querySelector('#loginDescription').textContent = '서버 환경 변수 PORTFOLIO_ADMIN_PASSWORD와 ADMIN_SESSION_SECRET 설정이 필요합니다.';
       loginForm.hidden = true;
     }
   } catch {
+    isAdmin = false;
     loginPanel.hidden = false;
     document.querySelector('#loginDescription').textContent = '관리자 로그인 상태를 확인하지 못했습니다. 페이지를 새로고침해 주세요.';
     loginForm.hidden = true;
@@ -187,8 +191,42 @@ function createPostCard(post, index) {
     attachmentCount.textContent = `${String(post.media.length).padStart(2, '0')} ATTACHMENTS`;
     info.append(attachmentCount);
   }
+  if (isAdmin) {
+    const deleteButton = document.createElement('button');
+    deleteButton.type = 'button';
+    deleteButton.className = 'delete-post-button';
+    deleteButton.textContent = '게시물 삭제';
+    deleteButton.setAttribute('aria-label', `${post.title} 게시물 삭제`);
+    deleteButton.addEventListener('click', () => deletePost(post, deleteButton));
+    info.append(deleteButton);
+  }
   card.append(media, info);
   return card;
+}
+
+async function deletePost(post, button) {
+  const confirmed = window.confirm(`“${post.title}” 게시물과 첨부된 사진·동영상을 삭제할까요? 삭제 후에는 복구할 수 없습니다.`);
+  if (!confirmed) return;
+  button.disabled = true;
+  button.textContent = '삭제 중…';
+  const archiveMessage = document.querySelector('#archiveMessage');
+  archiveMessage.hidden = true;
+  try {
+    const response = await fetch(`/api/posts/${encodeURIComponent(post._id)}`, { method: 'DELETE' });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.message || '게시물을 삭제하지 못했습니다.');
+    posts = posts.filter(item => item._id !== post._id);
+    renderPosts();
+    archiveMessage.textContent = '게시물과 첨부 미디어를 삭제했습니다.';
+    archiveMessage.classList.remove('notice-error');
+    archiveMessage.hidden = false;
+  } catch (error) {
+    archiveMessage.textContent = error.message || '게시물을 삭제하지 못했습니다. 다시 시도해 주세요.';
+    archiveMessage.classList.add('notice-error');
+    archiveMessage.hidden = false;
+    button.disabled = false;
+    button.textContent = '게시물 삭제';
+  }
 }
 
 function formatDate(value) {

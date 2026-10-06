@@ -118,6 +118,21 @@ app.get('/api/posts', async (req, res) => {
   }
 });
 
+app.delete('/api/posts/:id', requireAdmin, async (req, res) => {
+  if (!/^[a-f\d]{24}$/i.test(req.params.id)) {
+    return res.status(400).json({ success: false, message: '올바르지 않은 게시물 ID입니다.' });
+  }
+  try {
+    const post = await PortfolioPost.findById(req.params.id);
+    if (!post) return res.status(404).json({ success: false, message: '게시물을 찾을 수 없습니다.' });
+    await post.deleteOne();
+    await cleanupGridFsFiles((post.media || []).map(item => item.fileId));
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: '게시물을 삭제하지 못했습니다.' });
+  }
+});
+
 app.get('/api/media/:id', async (req, res) => {
   if (!/^[a-f\d]{24}$/i.test(req.params.id)) {
     return res.status(400).json({ success: false, message: '올바르지 않은 미디어 ID입니다.' });

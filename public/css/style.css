@@ -329,6 +329,10 @@ body { background: var(--paper); }
 .post-info { padding: 17px 17px 19px; }
 .post-info h3 { margin-top: 12px; font-size: 16px; }
 .post-description { font-size: 11px; line-height: 1.8; }
+.delete-post-button { display: block; margin: 13px 0 0 auto; padding: 7px 10px; border: 1px solid #e4e7e1; border-radius: 4px; background: #fff; color: #787f77; font-size: 10px; cursor: pointer; transition: color .2s, border-color .2s, background .2s; }
+.delete-post-button:hover:not(:disabled) { border-color: #d7a39a; background: #fcf4f2; color: #a34d40; }
+.delete-post-button:disabled { opacity: .6; cursor: wait; }
+.notice-error { color: #a34d40; }
 .category-tag { background: #eff4e7; color: #5d7938; }
 .empty-state { border: 1px solid #e7ebe3; border-radius: 8px; background: #fff; }
 .empty-icon { color: #80a846; }
