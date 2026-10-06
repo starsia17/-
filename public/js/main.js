@@ -1,242 +1,364 @@
-// ============ 상태 ============
-let myProfile = null;
-let currentPage = 1;
-let pendingJoinRoomId = null;
+const postGrid = document.querySelector('#postGrid');
+const emptyState = document.querySelector('#emptyState');
+const postCount = document.querySelector('#postCount');
+const postForm = document.querySelector('#postForm');
+const mediaInput = document.querySelector('#mediaInput');
+const previewList = document.querySelector('#previewList');
+const formMessage = document.querySelector('#formMessage');
+const submitButton = document.querySelector('#submitButton');
+const loginPanel = document.querySelector('#loginPanel');
+const loginForm = document.querySelector('#loginForm');
+const loginMessage = document.querySelector('#loginMessage');
+const dialog = document.querySelector('#mediaDialog');
+const dialogMedia = document.querySelector('#dialogMedia');
+const dialogCaption = document.querySelector('#dialogCaption');
 
-// ============ 요소 ============
-const profileScreen = document.getElementById('profileScreen');
-const mainScreen = document.getElementById('mainScreen');
-const avatarInput = document.getElementById('avatarInput');
-const avatarPreview = document.getElementById('avatarPreview');
-const avatarPlaceholder = document.getElementById('avatarPlaceholder');
-const nicknameInput = document.getElementById('nicknameInput');
-const saveProfileBtn = document.getElementById('saveProfileBtn');
-const profileError = document.getElementById('profileError');
+const MAX_FILES = 10;
+const MAX_FILE_SIZE = 50 * 1024 * 1024;
+const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'video/mp4', 'video/webm', 'video/quicktime']);
+let posts = [];
+let activeFilter = '전체';
+let selectedFiles = [];
+let objectUrls = [];
+let dialogPost = null;
+let dialogIndex = 0;
 
-const myAvatar = document.getElementById('myAvatar');
-const myAvatarFallback = document.getElementById('myAvatarFallback');
-const myNickname = document.getElementById('myNickname');
+loadPosts();
+refreshAdminStatus();
 
-const roomList = document.getElementById('roomList');
-const emptyRooms = document.getElementById('emptyRooms');
-const pagination = document.getElementById('pagination');
-
-const createRoomOpenBtn = document.getElementById('createRoomOpenBtn');
-const createRoomModal = document.getElementById('createRoomModal');
-const createRoomCancelBtn = document.getElementById('createRoomCancelBtn');
-const createRoomSubmitBtn = document.getElementById('createRoomSubmitBtn');
-const roomTitleInput = document.getElementById('roomTitleInput');
-const roomPasswordInput = document.getElementById('roomPasswordInput');
-const createRoomError = document.getElementById('createRoomError');
-
-const passwordModal = document.getElementById('passwordModal');
-const passwordRoomTitle = document.getElementById('passwordRoomTitle');
-const passwordInput = document.getElementById('passwordInput');
-const passwordCancelBtn = document.getElementById('passwordCancelBtn');
-const passwordSubmitBtn = document.getElementById('passwordSubmitBtn');
-const passwordError = document.getElementById('passwordError');
-
-let selectedAvatarBase64 = '';
-
-// ============ 초기화 ============
-init();
-
-async function init() {
-  const res = await fetch('/api/profile');
-  const data = await res.json();
-  if (data.success && data.profile) {
-    myProfile = data.profile;
-    showMainScreen();
-  } else {
-    profileScreen.classList.remove('hidden');
+async function refreshAdminStatus() {
+  try {
+    const response = await fetch('/api/admin/status');
+    const status = await response.json();
+    loginPanel.hidden = status.authenticated;
+    postForm.hidden = !status.authenticated;
+    if (!status.configured) {
+      document.querySelector('#loginDescription').textContent = '서버 환경 변수 PORTFOLIO_ADMIN_PASSWORD와 ADMIN_SESSION_SECRET 설정이 필요합니다.';
+      loginForm.hidden = true;
+    }
+  } catch {
+    loginPanel.hidden = false;
+    document.querySelector('#loginDescription').textContent = '관리자 로그인 상태를 확인하지 못했습니다. 페이지를 새로고침해 주세요.';
+    loginForm.hidden = true;
   }
 }
 
-// ============ 프로필 이미지 선택 ============
-document.querySelector('.avatar-picker').addEventListener('click', () => avatarInput.click());
-
-avatarInput.addEventListener('change', () => {
-  const file = avatarInput.files[0];
-  if (!file) return;
-  if (file.size > 3 * 1024 * 1024) {
-    profileError.textContent = '이미지 용량은 3MB 이하로 선택해주세요.';
-    return;
-  }
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    selectedAvatarBase64 = e.target.result;
-    avatarPreview.src = selectedAvatarBase64;
-    avatarPreview.classList.remove('hidden');
-    avatarPlaceholder.classList.add('hidden');
-  };
-  reader.readAsDataURL(file);
-});
-
-// ============ 프로필 저장 ============
-saveProfileBtn.addEventListener('click', async () => {
-  const nickname = nicknameInput.value.trim();
-  profileError.textContent = '';
-  if (!nickname) {
-    profileError.textContent = '닉네임을 입력해주세요.';
-    return;
-  }
-  saveProfileBtn.disabled = true;
+loginForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  const loginButton = document.querySelector('#loginButton');
+  loginButton.disabled = true;
+  loginMessage.hidden = true;
   try {
-    const res = await fetch('/api/profile', {
+    const response = await fetch('/api/admin/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nickname, avatar: selectedAvatarBase64 })
+      body: JSON.stringify({ password: document.querySelector('#adminPassword').value })
     });
-    const data = await res.json();
-    if (!data.success) {
-      profileError.textContent = data.message;
-      // 이미 프로필이 있는 경우 -> 해당 프로필로 진행
-      if (data.profile) {
-        myProfile = data.profile;
-        setTimeout(showMainScreen, 800);
-      }
-      return;
-    }
-    myProfile = data.profile;
-    showMainScreen();
-  } catch (err) {
-    profileError.textContent = '오류가 발생했습니다. 다시 시도해주세요.';
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.message || '로그인하지 못했습니다.');
+    loginForm.reset();
+    await refreshAdminStatus();
+  } catch (error) {
+    loginMessage.textContent = error.message;
+    loginMessage.classList.add('error');
+    loginMessage.hidden = false;
   } finally {
-    saveProfileBtn.disabled = false;
+    loginButton.disabled = false;
   }
 });
 
-function showMainScreen() {
-  profileScreen.classList.add('hidden');
-  mainScreen.classList.remove('hidden');
-  myNickname.textContent = myProfile.nickname;
-  if (myProfile.avatar) {
-    myAvatar.src = myProfile.avatar;
-    myAvatar.classList.remove('hidden');
-    myAvatarFallback.classList.add('hidden');
-  }
-  loadRooms(1);
-}
+document.querySelector('#logoutButton').addEventListener('click', async () => {
+  await fetch('/api/admin/logout', { method: 'POST' });
+  await refreshAdminStatus();
+});
 
-// ============ 채팅방 목록 ============
-async function loadRooms(page) {
-  currentPage = page;
-  const res = await fetch(`/api/rooms?page=${page}`);
-  const data = await res.json();
-  if (!data.success) return;
-
-  roomList.innerHTML = '';
-  if (data.rooms.length === 0) {
-    emptyRooms.classList.remove('hidden');
-  } else {
-    emptyRooms.classList.add('hidden');
-    data.rooms.forEach(room => {
-      const card = document.createElement('div');
-      card.className = 'room-card';
-      card.innerHTML = `
-        <div class="room-card-info">
-          <div class="room-card-title">${escapeHtml(room.title)} ${room.hasPassword ? '<span class="lock-badge">🔒</span>' : ''}</div>
-          <div class="room-card-meta">만든이 ${escapeHtml(room.creatorNickname)} · ${room.memberCount}명 참여중</div>
-        </div>
-        <button class="room-card-enter">입장</button>
-      `;
-      card.querySelector('.room-card-enter').addEventListener('click', () => tryJoinRoom(room._id, room.title, room.hasPassword));
-      roomList.appendChild(card);
-    });
-  }
-
-  renderPagination(data.currentPage, data.totalPages);
-}
-
-function renderPagination(current, total) {
-  pagination.innerHTML = '';
-  for (let i = 1; i <= total; i++) {
-    const btn = document.createElement('button');
-    btn.className = 'page-btn' + (i === current ? ' active' : '');
-    btn.textContent = i;
-    btn.addEventListener('click', () => loadRooms(i));
-    pagination.appendChild(btn);
+async function loadPosts() {
+  try {
+    const response = await fetch('/api/posts');
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.message || '게시물을 불러오지 못했습니다.');
+    posts = data.posts || [];
+    document.querySelector('#loadError').hidden = true;
+    renderPosts();
+  } catch (error) {
+    document.querySelector('#loadError').textContent = '게시물을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.';
+    document.querySelector('#loadError').hidden = false;
+    emptyState.hidden = true;
   }
 }
 
-// ============ 채팅방 입장 ============
-async function tryJoinRoom(roomId, title, hasPassword) {
-  if (hasPassword) {
-    pendingJoinRoomId = roomId;
-    passwordRoomTitle.textContent = title;
-    passwordInput.value = '';
-    passwordError.textContent = '';
-    passwordModal.classList.remove('hidden');
-    return;
-  }
-  await joinRoom(roomId, null);
-}
-
-async function joinRoom(roomId, password) {
-  const res = await fetch(`/api/rooms/${roomId}/join`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password })
+function renderPosts() {
+  const query = document.querySelector('#searchInput').value.trim().toLocaleLowerCase();
+  const visiblePosts = posts.filter(post => {
+    const categoryMatch = activeFilter === '전체' || post.category === activeFilter;
+    const searchMatch = !query || `${post.title} ${post.description} ${post.category}`.toLocaleLowerCase().includes(query);
+    return categoryMatch && searchMatch;
   });
-  const data = await res.json();
-  if (!data.success) {
-    if (data.needPassword) {
-      passwordError.textContent = data.message;
-      passwordModal.classList.remove('hidden');
-    } else {
-      alert(data.message);
-    }
-    return;
+  postGrid.replaceChildren();
+  postCount.textContent = String(posts.length).padStart(2, '0');
+  visiblePosts.forEach((post, index) => postGrid.append(createPostCard(post, index)));
+  emptyState.hidden = visiblePosts.length > 0;
+  if (visiblePosts.length === 0 && posts.length > 0) {
+    emptyState.querySelector('h3').textContent = '검색 결과가 없어요';
+    emptyState.querySelector('p').textContent = '다른 단어나 분류로 다시 찾아보세요.';
+    emptyState.querySelector('.text-link').hidden = true;
+  } else {
+    emptyState.querySelector('h3').textContent = '아직 기록된 작업이 없어요';
+    emptyState.querySelector('p').textContent = '첫 번째 작업을 올려 아카이브를 시작해 보세요.';
+    emptyState.querySelector('.text-link').hidden = false;
   }
-  window.location.href = `/room.html?id=${roomId}`;
 }
 
-passwordCancelBtn.addEventListener('click', () => passwordModal.classList.add('hidden'));
-passwordSubmitBtn.addEventListener('click', () => {
-  if (!passwordInput.value) {
-    passwordError.textContent = '비밀번호를 입력해주세요.';
-    return;
-  }
-  joinRoom(pendingJoinRoomId, passwordInput.value);
-});
+function createPostCard(post, index) {
+  const card = document.createElement('article');
+  card.className = 'post-card';
+  card.style.setProperty('--card-delay', `${Math.min(index, 8) * 55}ms`);
 
-// ============ 채팅방 생성 ============
-createRoomOpenBtn.addEventListener('click', () => {
-  roomTitleInput.value = '';
-  roomPasswordInput.value = '';
-  createRoomError.textContent = '';
-  createRoomModal.classList.remove('hidden');
-});
-createRoomCancelBtn.addEventListener('click', () => createRoomModal.classList.add('hidden'));
-
-createRoomSubmitBtn.addEventListener('click', async () => {
-  const title = roomTitleInput.value.trim();
-  if (!title) {
-    createRoomError.textContent = '채팅방 제목을 입력해주세요.';
-    return;
-  }
-  createRoomSubmitBtn.disabled = true;
-  try {
-    const res = await fetch('/api/rooms', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, password: roomPasswordInput.value })
+  const media = document.createElement('div');
+  media.className = 'post-media';
+  if (post.media?.length) {
+    post.media.slice(0, 4).forEach((item, mediaIndex) => {
+      const tile = document.createElement('button');
+      tile.type = 'button';
+      tile.className = `media-tile media-count-${Math.min(post.media.length, 4)}`;
+      tile.setAttribute('aria-label', `${post.title} 미디어 ${mediaIndex + 1} 보기`);
+      if (item.type === 'video') {
+        const video = document.createElement('video');
+        video.src = item.url;
+        video.preload = 'metadata';
+        video.muted = true;
+        video.playsInline = true;
+        tile.append(video);
+        const play = document.createElement('span');
+        play.className = 'video-indicator';
+        play.textContent = '▶';
+        tile.append(play);
+      } else {
+        const image = document.createElement('img');
+        image.src = item.url;
+        image.alt = item.name || post.title;
+        image.loading = 'lazy';
+        tile.append(image);
+      }
+      if (mediaIndex === 3 && post.media.length > 4) {
+        const more = document.createElement('span');
+        more.className = 'media-more';
+        more.textContent = `+${post.media.length - 4}`;
+        tile.append(more);
+      }
+      tile.addEventListener('click', () => openMedia(post, mediaIndex));
+      media.append(tile);
     });
-    const data = await res.json();
-    if (!data.success) {
-      createRoomError.textContent = data.message;
-      return;
-    }
-    window.location.href = `/room.html?id=${data.room._id}`;
-  } catch (err) {
-    createRoomError.textContent = '오류가 발생했습니다.';
+  } else {
+    media.classList.add('post-media-empty');
+    const motif = document.createElement('span');
+    motif.className = 'empty-motif';
+    motif.textContent = ['✳', '◒', '⌘', '✷'][index % 4];
+    media.append(motif);
+    const mediaLabel = document.createElement('span');
+    mediaLabel.className = 'empty-media-label';
+    mediaLabel.textContent = 'A NOTE FROM THE PROCESS';
+    media.append(mediaLabel);
+  }
+
+  const info = document.createElement('div');
+  info.className = 'post-info';
+  const meta = document.createElement('div');
+  meta.className = 'post-meta';
+  const category = document.createElement('span');
+  category.className = 'category-tag';
+  category.textContent = post.category || '기타';
+  const date = document.createElement('time');
+  date.dateTime = post.createdAt;
+  date.textContent = formatDate(post.createdAt);
+  meta.append(category, date);
+  const title = document.createElement('h3');
+  title.textContent = post.title;
+  info.append(meta, title);
+  if (post.description) {
+    const description = document.createElement('p');
+    description.className = 'post-description';
+    description.textContent = post.description;
+    info.append(description);
+  }
+  if (post.media?.length) {
+    const attachmentCount = document.createElement('span');
+    attachmentCount.className = 'attachment-count';
+    attachmentCount.textContent = `${String(post.media.length).padStart(2, '0')} ATTACHMENTS`;
+    info.append(attachmentCount);
+  }
+  card.append(media, info);
+  return card;
+}
+
+function formatDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: 'short', day: 'numeric' }).format(date);
+}
+
+function openMedia(post, startIndex) {
+  dialogPost = post;
+  dialogIndex = startIndex;
+  renderDialogMedia();
+  dialog.showModal();
+}
+
+function renderDialogMedia() {
+  if (!dialogPost) return;
+  const post = dialogPost;
+  const startIndex = dialogIndex;
+  const item = post.media[startIndex];
+  if (!item) return;
+  dialogMedia.replaceChildren();
+  const media = item.type === 'video' ? document.createElement('video') : document.createElement('img');
+  media.src = item.url;
+  if (item.type === 'video') {
+    media.controls = true;
+    media.autoplay = true;
+    media.playsInline = true;
+  } else {
+    media.alt = item.name || post.title;
+  }
+  dialogMedia.append(media);
+  dialogCaption.textContent = `${post.title} · ${startIndex + 1} / ${post.media.length}`;
+  document.querySelector('#previousMedia').disabled = post.media.length < 2;
+  document.querySelector('#nextMedia').disabled = post.media.length < 2;
+}
+
+document.querySelector('#previousMedia').addEventListener('click', () => {
+  if (!dialogPost?.media.length) return;
+  dialogIndex = (dialogIndex - 1 + dialogPost.media.length) % dialogPost.media.length;
+  renderDialogMedia();
+});
+document.querySelector('#nextMedia').addEventListener('click', () => {
+  if (!dialogPost?.media.length) return;
+  dialogIndex = (dialogIndex + 1) % dialogPost.media.length;
+  renderDialogMedia();
+});
+dialog.addEventListener('keydown', event => {
+  if (!dialogPost?.media.length) return;
+  if (event.key === 'ArrowLeft') document.querySelector('#previousMedia').click();
+  if (event.key === 'ArrowRight') document.querySelector('#nextMedia').click();
+});
+
+document.querySelectorAll('.filter-chip').forEach(button => {
+  button.addEventListener('click', () => {
+    document.querySelector('.filter-chip.active')?.classList.remove('active');
+    button.classList.add('active');
+    activeFilter = button.dataset.filter;
+    renderPosts();
+  });
+});
+document.querySelector('#searchInput').addEventListener('input', renderPosts);
+
+mediaInput.addEventListener('change', () => {
+  addFiles(mediaInput.files);
+  mediaInput.value = '';
+});
+const dropZone = document.querySelector('#dropZone');
+dropZone.addEventListener('dragover', event => { event.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', event => {
+  event.preventDefault();
+  dropZone.classList.remove('drag-over');
+  addFiles(event.dataTransfer.files);
+});
+
+function addFiles(fileList) {
+  const incoming = Array.from(fileList || []);
+  const current = new Set(selectedFiles.map(file => `${file.name}:${file.size}:${file.lastModified}`));
+  const invalid = incoming.find(file => !ALLOWED_TYPES.has(file.type));
+  if (invalid) return showFormMessage(`${invalid.name}: 지원하지 않는 사진 또는 동영상 형식입니다.`, true);
+  const oversized = incoming.find(file => file.size > MAX_FILE_SIZE);
+  if (oversized) return showFormMessage(`${oversized.name}: 파일당 최대 크기는 50MB입니다.`, true);
+  const additions = [];
+  incoming.forEach(file => {
+    const identity = `${file.name}:${file.size}:${file.lastModified}`;
+    if (!current.has(identity)) { current.add(identity); additions.push(file); }
+  });
+  if (selectedFiles.length + additions.length > MAX_FILES) return showFormMessage('한 게시물에는 최대 10개까지 첨부할 수 있어요.', true);
+  selectedFiles.push(...additions);
+  clearFormMessage();
+  renderPreviews();
+}
+
+function renderPreviews() {
+  objectUrls.forEach(URL.revokeObjectURL);
+  objectUrls = [];
+  previewList.replaceChildren();
+  selectedFiles.forEach((file, index) => {
+    const item = document.createElement('div');
+    item.className = 'preview-item';
+    const url = URL.createObjectURL(file);
+    objectUrls.push(url);
+    const preview = file.type.startsWith('video/') ? document.createElement('video') : document.createElement('img');
+    preview.src = url;
+    if (preview.tagName === 'VIDEO') { preview.muted = true; preview.playsInline = true; }
+    else preview.alt = '';
+    const details = document.createElement('div');
+    details.className = 'preview-details';
+    const name = document.createElement('strong');
+    name.textContent = file.name;
+    const size = document.createElement('span');
+    size.textContent = `${file.type.startsWith('video/') ? 'VIDEO' : 'IMAGE'} · ${formatBytes(file.size)}`;
+    details.append(name, size);
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'remove-file';
+    remove.setAttribute('aria-label', `${file.name} 첨부 취소`);
+    remove.textContent = '×';
+    remove.addEventListener('click', () => { selectedFiles.splice(index, 1); renderPreviews(); });
+    item.append(preview, details, remove);
+    previewList.append(item);
+  });
+}
+
+function formatBytes(bytes) {
+  return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+postForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!postForm.reportValidity()) return;
+  const payload = new FormData();
+  payload.set('title', document.querySelector('#titleInput').value.trim());
+  payload.set('category', document.querySelector('#categoryInput').value);
+  payload.set('description', document.querySelector('#descriptionInput').value.trim());
+  selectedFiles.forEach(file => payload.append('media', file));
+  submitButton.disabled = true;
+  submitButton.querySelector('span:first-child').textContent = '게시물을 저장하고 있어요…';
+  clearFormMessage();
+  try {
+    const response = await fetch('/api/posts', { method: 'POST', body: payload });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.message || '게시물을 저장하지 못했습니다.');
+    posts.unshift(data.post);
+    postForm.reset();
+    selectedFiles = [];
+    renderPreviews();
+    activeFilter = '전체';
+    document.querySelectorAll('.filter-chip').forEach(button => button.classList.toggle('active', button.dataset.filter === '전체'));
+    document.querySelector('#searchInput').value = '';
+    renderPosts();
+    showFormMessage('작업이 아카이브에 등록됐어요.');
+    document.querySelector('#work').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (error) {
+    showFormMessage(error.message || '게시물을 저장하지 못했습니다. 다시 시도해 주세요.', true);
   } finally {
-    createRoomSubmitBtn.disabled = false;
+    submitButton.disabled = false;
+    submitButton.querySelector('span:first-child').textContent = '게시물 등록하기';
   }
 });
 
-function escapeHtml(str) {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
+function showFormMessage(message, isError = false) {
+  formMessage.textContent = message;
+  formMessage.classList.toggle('error', isError);
+  formMessage.hidden = false;
 }
+function clearFormMessage() { formMessage.hidden = true; formMessage.textContent = ''; }
+
+document.querySelector('#closeDialog').addEventListener('click', () => dialog.close());
+dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
+dialog.addEventListener('close', () => { dialogMedia.replaceChildren(); dialogPost = null; });
+
