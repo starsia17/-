@@ -72,8 +72,7 @@ loginForm.addEventListener('submit', async event => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password: document.querySelector('#adminPassword').value })
     });
-    const data = await response.json();
-    if (!response.ok || !data.success) throw new Error(data.message || '로그인하지 못했습니다.');
+    const data = await readApiResponse(response);
     loginForm.reset();
     await refreshAdminStatus();
   } catch (error) {
@@ -93,14 +92,13 @@ document.querySelector('#logoutButton').addEventListener('click', async () => {
 async function loadPosts() {
   try {
     const response = await fetch('/api/posts');
-    const data = await response.json();
-    if (!response.ok || !data.success) throw new Error(data.message || '게시물을 불러오지 못했습니다.');
+    const data = await readApiResponse(response);
     posts = data.posts || [];
     document.querySelector('#loadError').hidden = true;
     renderPosts();
     syncPageFromHash();
   } catch (error) {
-    document.querySelector('#loadError').textContent = '게시물을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.';
+    document.querySelector('#loadError').textContent = error.message || '게시물을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.';
     document.querySelector('#loadError').hidden = false;
     emptyState.hidden = true;
   }
@@ -242,8 +240,7 @@ async function deletePost(post, button) {
   archiveMessage.hidden = true;
   try {
     const response = await fetch(`/api/posts/${encodeURIComponent(post._id)}`, { method: 'DELETE' });
-    const data = await response.json();
-    if (!response.ok || !data.success) throw new Error(data.message || '게시물을 삭제하지 못했습니다.');
+    await readApiResponse(response);
     posts = posts.filter(item => item._id !== post._id);
     renderPosts();
     archiveMessage.textContent = '게시물을 휴지통으로 이동했습니다. 30일 안에 복원할 수 있어요.';
@@ -568,8 +565,7 @@ async function loadPostDetail(id) {
     let post = cached;
     if (!post) {
       const response = await fetch(`/api/posts/${encodeURIComponent(id)}`);
-      const data = await response.json();
-      if (!response.ok || !data.success) throw new Error(data.message || '게시물을 찾을 수 없습니다.');
+      const data = await readApiResponse(response);
       post = data.post;
     }
     if (location.hash !== `#post/${id}`) return;
@@ -612,8 +608,7 @@ async function loadPostDetail(id) {
         if (!window.confirm(`“${post.title}” 게시물을 휴지통으로 이동할까요? 30일 안에 복원할 수 있습니다.`)) return;
         try {
           const response = await fetch(`/api/posts/${encodeURIComponent(post._id)}`, { method: 'DELETE' });
-          const data = await response.json();
-          if (!response.ok || !data.success) throw new Error(data.message || '게시물을 이동하지 못했습니다.');
+          await readApiResponse(response);
           location.hash = 'work'; loadPosts();
         } catch (error) { window.alert(error.message || '게시물을 이동하지 못했습니다.'); }
       });
@@ -695,8 +690,7 @@ async function loadTrash() {
   }
   try {
     const response = await fetch('/api/trash');
-    const data = await response.json();
-    if (!response.ok || !data.success) throw new Error(data.message || '휴지통을 불러오지 못했습니다.');
+    const data = await readApiResponse(response);
     trashBulkActions.hidden = data.posts.length === 0;
     data.posts.forEach(post => {
       const row = document.createElement('article'); row.className = 'trash-row';
@@ -754,13 +748,16 @@ async function restoreSelectedPosts() {
   if (!ids.length) return;
   restoreSelectedButton.disabled = true;
   try {
-    const response = await fetch('/api/trash/restore', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids })
-    });
-    const data = await response.json();
-    if (!response.ok || !data.success) throw new Error(data.message || '게시물을 복원하지 못했습니다.');
+    let restored = 0;
+    for (let index = 0; index < ids.length; index += 100) {
+      const response = await fetch('/api/trash/restore', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: ids.slice(index, index + 100) })
+      });
+      const data = await readApiResponse(response);
+      restored += data.restored;
+    }
     const message = document.querySelector('#trashMessage');
-    message.textContent = `${data.restored}개 게시물을 원래 내용과 함께 홈에 복원했습니다.`;
+    message.textContent = `${restored}개 게시물을 원래 내용과 함께 홈에 복원했습니다.`;
     message.hidden = false;
     await Promise.all([loadTrash(), loadPosts()]);
   } catch (error) {
@@ -770,20 +767,22 @@ async function restoreSelectedPosts() {
 }
 
 async function restorePost(post) {
-  const response = await fetch(`/api/trash/${encodeURIComponent(post._id)}/restore`, { method: 'POST' });
-  const data = await response.json();
-  if (!response.ok || !data.success) { window.alert(data.message || '복원하지 못했습니다.'); return; }
-  document.querySelector('#trashMessage').textContent = '게시물을 복원했습니다.';
-  document.querySelector('#trashMessage').hidden = false;
-  await Promise.all([loadTrash(), loadPosts()]);
+  try {
+    const response = await fetch(`/api/trash/${encodeURIComponent(post._id)}/restore`, { method: 'POST' });
+    await readApiResponse(response);
+    document.querySelector('#trashMessage').textContent = '게시물을 복원했습니다.';
+    document.querySelector('#trashMessage').hidden = false;
+    await Promise.all([loadTrash(), loadPosts()]);
+  } catch (error) { window.alert(error.message || '복원하지 못했습니다.'); }
 }
 
 async function permanentlyDeletePost(post) {
   if (!window.confirm(`“${post.title}” 게시물과 첨부 파일을 완전히 삭제할까요? 복구할 수 없습니다.`)) return;
-  const response = await fetch(`/api/trash/${encodeURIComponent(post._id)}`, { method: 'DELETE' });
-  const data = await response.json();
-  if (!response.ok || !data.success) { window.alert(data.message || '완전히 삭제하지 못했습니다.'); return; }
-  await loadTrash();
+  try {
+    const response = await fetch(`/api/trash/${encodeURIComponent(post._id)}`, { method: 'DELETE' });
+    await readApiResponse(response);
+    await loadTrash();
+  } catch (error) { window.alert(error.message || '완전히 삭제하지 못했습니다.'); }
 }
 
 function plainText(html) {
@@ -843,7 +842,11 @@ async function readApiResponse(response) {
   let data;
   try { data = JSON.parse(text); }
   catch { throw new Error(text.trim().slice(0, 240) || `서버 응답을 읽지 못했습니다. (HTTP ${response.status})`); }
-  if (!response.ok || !data.success) throw new Error(data.message || `저장하지 못했습니다. (HTTP ${response.status})`);
+  if (!response.ok || data.success === false) {
+    const error = new Error(data.message || `요청을 처리하지 못했습니다. (HTTP ${response.status})`);
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
 function clearFormMessage() { formMessage.hidden = true; formMessage.textContent = ''; }

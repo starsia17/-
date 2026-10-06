@@ -116,18 +116,20 @@ app.post('/api/admin/logout', (req, res) => {
 
 app.get('/api/posts', async (req, res) => {
   try {
-    const posts = await PortfolioPost.find({ deletedAt: null }).sort({ createdAt: -1 }).limit(100).lean();
+    const posts = await PortfolioPost.find({ deletedAt: null }).sort({ createdAt: -1, _id: -1 }).lean();
     res.json({ success: true, posts: posts.map(serializePost) });
   } catch (err) {
+    console.error('게시물 목록 조회 실패:', err);
     res.status(500).json({ success: false, message: '게시물을 불러오지 못했습니다.' });
   }
 });
 
 app.get('/api/trash', requireAdmin, async (req, res) => {
   try {
-    const posts = await PortfolioPost.find({ deletedAt: { $ne: null } }).sort({ deletedAt: -1 }).limit(100).lean();
+    const posts = await PortfolioPost.find({ deletedAt: { $ne: null } }).sort({ deletedAt: -1, _id: -1 }).lean();
     res.json({ success: true, posts: posts.map(serializePost) });
   } catch (err) {
+    console.error('휴지통 조회 실패:', err);
     res.status(500).json({ success: false, message: '휴지통을 불러오지 못했습니다.' });
   }
 });
@@ -139,6 +141,7 @@ app.get('/api/posts/:id', async (req, res) => {
     if (!post) return res.status(404).json({ success: false, message: '게시물을 찾을 수 없습니다.' });
     res.json({ success: true, post: serializePost(post) });
   } catch (err) {
+    console.error('게시물 상세 조회 실패:', err);
     res.status(500).json({ success: false, message: '게시물을 불러오지 못했습니다.' });
   }
 });
@@ -157,6 +160,7 @@ app.delete('/api/posts/:id', requireAdmin, async (req, res) => {
     await post.save();
     res.json({ success: true, post: serializePost(post) });
   } catch (err) {
+    console.error('게시물 휴지통 이동 실패:', err);
     res.status(500).json({ success: false, message: '게시물을 삭제하지 못했습니다.' });
   }
 });
@@ -173,6 +177,7 @@ app.post('/api/trash/restore', requireAdmin, async (req, res) => {
     );
     res.json({ success: true, restored: result.modifiedCount });
   } catch (err) {
+    console.error('선택 게시물 복원 실패:', err);
     res.status(500).json({ success: false, message: '게시물을 복원하지 못했습니다.' });
   }
 });
@@ -188,6 +193,7 @@ app.post('/api/trash/:id/restore', requireAdmin, async (req, res) => {
     if (!post) return res.status(404).json({ success: false, message: '휴지통에서 게시물을 찾을 수 없습니다.' });
     res.json({ success: true, post: serializePost(post) });
   } catch (err) {
+    console.error('게시물 복원 실패:', err);
     res.status(500).json({ success: false, message: '게시물을 복원하지 못했습니다.' });
   }
 });
@@ -200,6 +206,7 @@ app.delete('/api/trash/:id', requireAdmin, async (req, res) => {
     await cleanupGridFsFiles((post.media || []).map(item => item.fileId));
     res.json({ success: true });
   } catch (err) {
+    console.error('게시물 영구 삭제 실패:', err);
     res.status(500).json({ success: false, message: '게시물을 완전히 삭제하지 못했습니다.' });
   }
 });
@@ -448,8 +455,8 @@ function sanitizeRichText(input, inlineMedia = new Map()) {
       const found = new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i').exec(attrs);
       return found ? (found[1] ?? found[2] ?? found[3] ?? '') : '';
     };
-    const token = attribute('data-upload-token');
-    const uploaded = inlineMedia.get(token);
+    const uploadToken = attribute('data-upload-token');
+    const uploaded = inlineMedia.get(uploadToken);
     const styleMatch = /\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(attrs);
     const style = styleMatch ? sanitizeEditorStyle(styleMatch[1] ?? styleMatch[2]) : '';
     let safeAttributes = style ? ` style="${escapeHtml(style)}"` : '';
