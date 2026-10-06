@@ -8,7 +8,7 @@
   <title>작업 아카이브 — Portfolio</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@300;400;500;600;700;800;900&family=Noto+Serif+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
   <script src="/js/main.js" defer></script>
 </head>
@@ -27,7 +27,7 @@
         </div>
       </details>
     </nav>
-    <a class="nav-cta" href="#write">새 작업 올리기 <span aria-hidden="true">↗</span></a>
+    <a class="nav-cta" href="#write">게시글 등록하기 <span aria-hidden="true">↗</span></a>
   </header>
 
   <main id="top">
@@ -56,7 +56,7 @@
     <section class="work-section" id="work">
       <div class="section-heading">
         <div><p class="eyebrow">SELECTED & PERSONAL</p><h2>작업 아카이브<span>.</span></h2></div>
-        <div class="work-count"><span id="postCount">00</span> WORKS</div>
+        <div class="archive-heading-actions"><div class="work-count"><span id="postCount">00</span> WORKS</div><a class="archive-write-button" href="#write">게시글 등록하기 <span aria-hidden="true">↗</span></a></div>
       </div>
       <div class="toolbar">
         <div class="filters" role="group" aria-label="작업물 분류">
@@ -72,7 +72,7 @@
       <div id="postGrid" class="post-grid" aria-live="polite"></div>
       <p id="archiveMessage" class="notice" role="status" hidden></p>
       <div id="emptyState" class="empty-state" hidden>
-        <span class="empty-icon">✳</span><h3>아직 기록된 작업이 없어요</h3><p>첫 번째 작업을 올려 아카이브를 시작해 보세요.</p><a href="#write" class="text-link">첫 작업 등록하기 ↗</a>
+        <span class="empty-icon">✳</span><h3>아직 기록된 작업이 없어요</h3><p>첫 번째 작업을 올려 아카이브를 시작해 보세요.</p><a href="#write" class="text-link">첫 게시글 등록하기 ↗</a>
       </div>
       <p id="loadError" class="notice" role="status" hidden></p>
     </section>
@@ -91,8 +91,8 @@
       <div id="trashEmpty" class="empty-state" hidden><span class="empty-icon">♧</span><h3>휴지통이 비어 있어요</h3><p>삭제한 게시물이 여기에 보관됩니다.</p></div>
     </section>
 
-    <section class="write-section" id="write">
-      <div class="write-intro"><p class="eyebrow">ADD TO THE ARCHIVE · 02</p><h2>새로운 작업을<br><span>기록해 볼까요?</span></h2><p>사진이나 동영상을 첨부하고<br>작업에 대한 이야기를 함께 남겨보세요.</p><div class="write-note">✳ 한 게시물에 최대 10개의 미디어 파일을 첨부할 수 있어요.</div></div>
+    <section class="composer-page page-view" id="write" hidden>
+      <header class="composer-heading"><a href="#work" class="detail-back">← 내 작업 아카이브</a><p class="eyebrow">NEW ENTRY · CREATIVE ARCHIVE</p><h1>새 게시글 작성<span>.</span></h1><p>글을 쓰다가 원하는 위치에 사진·동영상·파일을 넣을 수 있어요.</p></header>
       <section id="loginPanel" class="login-panel" aria-labelledby="loginTitle" hidden>
         <div class="form-topline"><span>ARCHIVE ACCESS</span><span>ADMIN</span></div>
         <span class="login-symbol" aria-hidden="true">✳</span>
@@ -105,7 +105,7 @@
           <button id="loginButton" class="submit-button" type="submit"><span>로그인</span><span aria-hidden="true">↗</span></button>
         </form>
       </section>
-      <form id="postForm" class="post-form" hidden>
+      <form id="postForm" class="post-form composer-form" hidden>
         <div class="form-topline"><span id="writeModeLabel">NEW PROJECT ENTRY</span><button id="logoutButton" class="logout-button" type="button">로그아웃 ↗</button></div>
         <label class="field-label" for="titleInput">작업 제목 <span>*</span></label>
         <input id="titleInput" name="title" maxlength="120" placeholder="작업의 이름을 적어주세요" required>
@@ -114,32 +114,30 @@
           <span class="field-hint">나중에 분류별로 모아볼 수 있어요.</span>
         </div>
         <label class="field-label" for="editor">본문 <span class="optional">선택</span></label>
-        <div class="editor-toolbar" role="toolbar" aria-label="본문 서식">
-          <label class="editor-control"><span class="sr-only">글씨체</span><select id="fontFamily" aria-label="글씨체"><option value="Noto Sans KR">기본 글씨체</option><option value="Georgia">명조체</option><option value="Arial">Arial</option></select></label>
-          <label class="editor-control editor-size-control"><span class="sr-only">글씨 크기</span><input id="fontSize" type="number" min="12" max="48" step="1" value="16" inputmode="numeric" aria-label="글씨 크기 (12–48px)" title="글씨 크기를 12~48px 사이 숫자로 입력"><span aria-hidden="true">px</span></label>
+        <div id="composerToolbar" class="editor-toolbar" role="toolbar" aria-label="본문 서식 및 파일 첨부">
+          <label class="editor-control font-family-control"><span class="sr-only">글씨체</span><select data-font-family aria-label="글씨체"><option value="Noto Sans KR">고딕 · Noto Sans</option><option value="Noto Serif KR">명조 · Noto Serif</option><option value="Georgia">Georgia</option><option value="Arial">Arial</option><option value="Verdana">Verdana</option><option value="Tahoma">Tahoma</option><option value="Trebuchet MS">Trebuchet MS</option><option value="Courier New">Courier New</option><option value="serif">기본 명조</option><option value="sans-serif">기본 고딕</option><option value="monospace">기본 고정폭</option></select></label>
+          <label class="editor-control weight-control"><span class="sr-only">글씨 굵기</span><select data-font-weight aria-label="글씨 굵기"><option value="300">가는 글씨</option><option value="400" selected>보통</option><option value="500">중간</option><option value="600">약간 굵게</option><option value="700">볼드</option><option value="800">아주 굵게</option><option value="900">가장 굵게</option></select></label>
+          <label class="editor-control editor-size-control"><span class="sr-only">글씨 크기</span><input data-font-size type="number" min="12" max="48" step="1" value="16" inputmode="numeric" aria-label="글씨 크기 (12–48px)" title="글씨 크기를 12~48px 사이 숫자로 입력"><span aria-hidden="true">px</span></label>
           <button type="button" class="editor-button" data-command="bold" aria-label="굵게"><strong>B</strong></button>
           <button type="button" class="editor-button" data-command="italic" aria-label="기울임"><em>I</em></button>
           <button type="button" class="editor-button" data-command="underline" aria-label="밑줄"><u>U</u></button>
-          <label class="editor-color" title="글자 색"><span>A</span><input id="fontColor" type="color" value="#17211a" aria-label="글자 색"></label>
+          <label class="editor-color" title="글자 색"><span>A</span><input data-font-color type="color" value="#17211a" aria-label="글자 색"></label>
           <span class="editor-separator" aria-hidden="true"></span>
           <button type="button" class="editor-button" data-align="left" aria-label="왼쪽 정렬">≡</button>
           <button type="button" class="editor-button" data-align="center" aria-label="가운데 정렬">☰</button>
           <button type="button" class="editor-button" data-align="right" aria-label="오른쪽 정렬">≡</button>
           <button type="button" class="editor-button" data-block="h2" aria-label="소제목">H</button>
           <button type="button" class="editor-button" data-command="insertUnorderedList" aria-label="글머리 기호">• 목록</button>
+          <span class="editor-separator" aria-hidden="true"></span>
+          <button type="button" class="inline-insert-button" data-open-picker="image">사진 넣기</button>
+          <button type="button" class="inline-insert-button" data-open-picker="video">동영상 넣기</button>
+          <button type="button" class="inline-insert-button" data-open-picker="file">파일 넣기</button>
+          <input data-file-input="image" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple hidden>
+          <input data-file-input="video" type="file" accept="video/mp4,video/webm,video/quicktime" multiple hidden>
+          <input data-file-input="file" type="file" multiple hidden>
         </div>
+        <p class="editor-hint">본문에서 넣을 위치를 클릭한 다음 첨부 버튼을 누르세요. 글씨체와 굵기(가는 글씨부터 볼드), 크기(12~48px)를 직접 고를 수 있습니다.</p>
         <div id="editor" class="rich-editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="게시물 본문" data-placeholder="무엇을 만들었나요? 아이디어와 과정, 사용한 도구 등을 자유롭게 적어주세요."></div>
-        <div class="upload-label-row"><span class="field-label">사진 · 동영상 <span class="optional">선택</span></span><span class="field-hint">이미지 / MP4 / WebM / MOV · 파일당 최대 50MB</span></div>
-        <div class="drop-zone" id="dropZone">
-          <span class="upload-icon">↑</span><strong>파일을 끌어 놓거나 종류를 골라 추가하세요</strong>
-          <div class="upload-actions">
-            <button class="upload-choice" id="chooseImages" type="button">사진 파일 선택</button>
-            <button class="upload-choice" id="chooseVideos" type="button">동영상 파일 선택</button>
-          </div>
-          <span>사진과 동영상을 각각 선택해 한 게시물에 함께 첨부할 수 있어요</span>
-          <input class="media-picker-input" id="imageInput" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple aria-label="사진 파일 선택">
-          <input class="media-picker-input" id="videoInput" type="file" accept="video/mp4,video/webm,video/quicktime" multiple aria-label="동영상 파일 선택">
-        </div>
         <div id="previewList" class="preview-list" aria-live="polite"></div>
         <p id="existingMediaNotice" class="existing-media-notice" hidden></p>
         <div id="formMessage" class="form-message" role="status" hidden></div>

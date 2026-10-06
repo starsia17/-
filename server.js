@@ -22,7 +22,7 @@ const GRIDFS_BUCKET_NAME = 'portfolioMedia';
 const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 let mediaBucket;
 let lastTrashPurgeAt = 0;
-const allowedMediaTypes = new Set([
+const inlineMediaTypes = new Set([
   'image/jpeg', 'image/png', 'image/gif', 'image/webp',
   'video/mp4', 'video/webm', 'video/quicktime'
 ]);
@@ -50,10 +50,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: { fileSize: 50 * 1024 * 1024, files: 10 },
-  fileFilter: (req, file, callback) => {
-    if (allowedMediaTypes.has(file.mimetype)) return callback(null, true);
-    callback(new Error('지원하지 않는 파일 형식입니다.'));
-  }
+  fileFilter: (req, file, callback) => callback(null, true)
 });
 
 function adminSessionToken(expiresAt) {
@@ -244,9 +241,11 @@ app.get('/api/media/:id', async (req, res) => {
       res.set('Content-Range', `bytes ${start}-${end}/${file.length}`);
     }
     res.set({
-      'Content-Type': allowedMediaTypes.has(file.metadata?.contentType) ? file.metadata.contentType : 'application/octet-stream',
+      'Content-Type': inlineMediaTypes.has(file.metadata?.contentType) ? file.metadata.contentType : 'application/octet-stream',
       'Content-Length': String(Math.max(0, end - start + 1)),
-      'Content-Disposition': 'inline',
+      'Content-Disposition': file.metadata?.kind === 'file'
+        ? `attachment; filename*=UTF-8''${encodeURIComponent(file.metadata.originalName || 'download')}`
+        : 'inline',
       'X-Content-Type-Options': 'nosniff',
       'Accept-Ranges': 'bytes',
       'Cache-Control': 'public, max-age=31536000, immutable'
@@ -266,22 +265,25 @@ app.post('/api/posts', requireAdmin, upload.array('media', 10), async (req, res)
   const uploadedIds = [];
   try {
     const title = (req.body.title || '').trim();
-    const bodyHtml = sanitizeRichText(req.body.bodyHtml || '');
-    const description = plainTextFromHtml(bodyHtml).trim();
     const category = (req.body.category || '기타').trim();
     if (!title) {
       await cleanupTempFiles(req.files);
       return res.status(400).json({ success: false, message: '작업 제목을 입력해주세요.' });
     }
-    if (title.length > 120 || description.length > 5000 || bodyHtml.length > 30000 || category.length > 40) {
+    if (title.length > 120 || category.length > 40 || String(req.body.bodyHtml || '').length > 60000) {
       await cleanupTempFiles(req.files);
       return res.status(400).json({ success: false, message: '입력한 내용이 허용 길이를 초과했습니다.' });
     }
-
     const media = [];
     for (const file of req.files || []) {
       const stored = await storeMediaFile(file, uploadedIds);
       media.push(stored);
+    }
+    const bodyHtml = sanitizeRichText(req.body.bodyHtml || '', createInlineMediaMap(req.body.inlineMedia, media));
+    const description = plainTextFromHtml(bodyHtml).trim();
+    if (description.length > 5000 || bodyHtml.length > 30000) {
+      await Promise.all([cleanupTempFiles(req.files), cleanupGridFsFiles(uploadedIds)]);
+      return res.status(400).json({ success: false, message: '본문은 5,000자까지 작성할 수 있어요.' });
     }
     const post = await PortfolioPost.create({ title, description, bodyHtml, category, media });
     await cleanupTempFiles(req.files);
@@ -308,10 +310,8 @@ app.put('/api/posts/:id', requireAdmin, upload.array('media', 10), async (req, r
       return res.status(404).json({ success: false, message: '수정할 게시물을 찾을 수 없습니다.' });
     }
     const title = (req.body.title || '').trim();
-    const bodyHtml = sanitizeRichText(req.body.bodyHtml || '');
-    const description = plainTextFromHtml(bodyHtml).trim();
     const category = (req.body.category || '기타').trim();
-    if (!title || title.length > 120 || description.length > 5000 || bodyHtml.length > 30000 || category.length > 40) {
+    if (!title || title.length > 120 || category.length > 40 || String(req.body.bodyHtml || '').length > 60000) {
       await cleanupTempFiles(req.files);
       return res.status(400).json({ success: false, message: '제목을 확인하거나 입력한 내용의 길이를 줄여주세요.' });
     }
@@ -320,7 +320,18 @@ app.put('/api/posts/:id', requireAdmin, upload.array('media', 10), async (req, r
       return res.status(400).json({ success: false, message: '한 게시물에는 최대 10개까지 첨부할 수 있어요.' });
     }
     const media = [...(post.media || [])];
-    for (const file of req.files || []) media.push(await storeMediaFile(file, uploadedIds));
+    const addedMedia = [];
+    for (const file of req.files || []) {
+      const stored = await storeMediaFile(file, uploadedIds);
+      media.push(stored);
+      addedMedia.push(stored);
+    }
+    const bodyHtml = sanitizeRichText(req.body.bodyHtml || '', createInlineMediaMap(req.body.inlineMedia, addedMedia));
+    const description = plainTextFromHtml(bodyHtml).trim();
+    if (description.length > 5000 || bodyHtml.length > 30000) {
+      await Promise.all([cleanupTempFiles(req.files), cleanupGridFsFiles(uploadedIds)]);
+      return res.status(400).json({ success: false, message: '본문은 5,000자까지 작성할 수 있어요.' });
+    }
     post.title = title;
     post.description = description;
     post.bodyHtml = bodyHtml;
@@ -343,9 +354,23 @@ function serializePost(post) {
   };
 }
 
+function createInlineMediaMap(rawDescriptors, uploadedMedia) {
+  let descriptors;
+  try { descriptors = JSON.parse(String(rawDescriptors || '[]')); } catch { return new Map(); }
+  if (!Array.isArray(descriptors)) return new Map();
+  const mapping = new Map();
+  descriptors.slice(0, uploadedMedia.length).forEach((descriptor, index) => {
+    if (typeof descriptor?.token === 'string' && /^[a-f\d-]{36}$/i.test(descriptor.token)) {
+      mapping.set(descriptor.token, uploadedMedia[index]);
+    }
+  });
+  return mapping;
+}
+
 async function storeMediaFile(file, uploadedIds) {
+  const type = !inlineMediaTypes.has(file.mimetype) ? 'file' : file.mimetype.startsWith('video/') ? 'video' : 'image';
   const stream = mediaBucket.openUploadStream(file.filename, {
-    metadata: { contentType: file.mimetype }
+    metadata: { contentType: file.mimetype, kind: type, originalName: file.originalname }
   });
   uploadedIds.push(stream.id);
   const completed = new Promise((resolve, reject) => {
@@ -369,7 +394,7 @@ async function storeMediaFile(file, uploadedIds) {
   await completed;
   return {
     fileId: stream.id,
-    type: file.mimetype.startsWith('video/') ? 'video' : 'image',
+    type,
     name: file.originalname,
     size: file.size
   };
@@ -401,9 +426,9 @@ async function cleanupExpiredMediaOrphans() {
   await cleanupGridFsFiles(orphaned.map(file => file._id));
 }
 
-const richTextTags = new Set(['p', 'div', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'ul', 'ol', 'li', 'blockquote', 'h1', 'h2', 'h3', 'span']);
+const richTextTags = new Set(['p', 'div', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'ul', 'ol', 'li', 'blockquote', 'h1', 'h2', 'h3', 'span', 'figure', 'figcaption', 'img', 'video', 'a']);
 
-function sanitizeRichText(input) {
+function sanitizeRichText(input, inlineMedia = new Map()) {
   const source = String(input).slice(0, 60000)
     .replace(/<(script|style|iframe|object|svg|math|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
     .replace(/<!--[\s\S]*?-->/g, '');
@@ -416,9 +441,30 @@ function sanitizeRichText(input) {
     const tag = match[2].toLowerCase();
     if (!richTextTags.has(tag)) continue;
     if (closing) { if (tag !== 'br') output += `</${tag}>`; continue; }
-    const styleMatch = /\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(match[3]);
+    const attrs = match[3];
+    const attribute = name => {
+      const found = new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i').exec(attrs);
+      return found ? (found[1] ?? found[2] ?? found[3] ?? '') : '';
+    };
+    const token = attribute('data-upload-token');
+    const uploaded = inlineMedia.get(token);
+    const styleMatch = /\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(attrs);
     const style = styleMatch ? sanitizeEditorStyle(styleMatch[1] ?? styleMatch[2]) : '';
-    output += `<${tag}${style ? ` style="${style}"` : ''}${tag === 'br' ? '>' : '>'}`;
+    let safeAttributes = style ? ` style="${escapeHtml(style)}"` : '';
+    if (tag === 'img' || tag === 'video') {
+      const expectedType = tag === 'img' ? 'image' : 'video';
+      const src = uploaded?.type === expectedType ? `/api/media/${uploaded.fileId}` : attribute('src');
+      if (!/^\/api\/media\/[a-f\d]{24}$/i.test(src)) continue;
+      safeAttributes += ` src="${src}"`;
+      if (tag === 'img') safeAttributes += ` alt="${escapeHtml(uploaded?.name || attribute('alt').slice(0, 200))}" loading="lazy"`;
+      else safeAttributes += ' controls playsinline preload="metadata"';
+    }
+    if (tag === 'a') {
+      const href = uploaded?.type === 'file' ? `/api/media/${uploaded.fileId}` : attribute('href');
+      if (!/^\/api\/media\/[a-f\d]{24}$/i.test(href)) continue;
+      safeAttributes += ` href="${href}" download`;
+    }
+    output += `<${tag}${safeAttributes}>`;
   }
   return output;
 }
@@ -435,9 +481,10 @@ function sanitizeEditorStyle(raw) {
       const size = /^(\d{1,2})px$/i.exec(value);
       if (size) safe.push(`font-size:${Math.min(48, Math.max(12, Number(size[1])))}px`);
     }
+    if (key === 'font-weight' && /^(300|400|500|600|700|800|900|normal|bold)$/i.test(value)) safe.push(`font-weight:${value.toLowerCase()}`);
     if (key === 'font-family') {
       const family = value.replace(/["']/g, '').trim();
-      const allowed = ['Noto Sans KR', 'Georgia', 'Arial', 'serif', 'sans-serif'];
+      const allowed = ['Noto Sans KR', 'Noto Serif KR', 'Georgia', 'Arial', 'Verdana', 'Tahoma', 'Trebuchet MS', 'Courier New', 'serif', 'sans-serif', 'monospace'];
       if (allowed.includes(family)) safe.push(`font-family:${family.includes(' ') ? `"${family}"` : family}`);
     }
   }

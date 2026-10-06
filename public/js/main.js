@@ -2,8 +2,6 @@ const postGrid = document.querySelector('#postGrid');
 const emptyState = document.querySelector('#emptyState');
 const postCount = document.querySelector('#postCount');
 const postForm = document.querySelector('#postForm');
-const imageInput = document.querySelector('#imageInput');
-const videoInput = document.querySelector('#videoInput');
 const previewList = document.querySelector('#previewList');
 const formMessage = document.querySelector('#formMessage');
 const submitButton = document.querySelector('#submitButton');
@@ -16,6 +14,7 @@ const dialogCaption = document.querySelector('#dialogCaption');
 const editor = document.querySelector('#editor');
 const detailView = document.querySelector('#postDetail');
 const trashSection = document.querySelector('#trashSection');
+const composerPage = document.querySelector('#write');
 const trashList = document.querySelector('#trashList');
 const trashBulkActions = document.querySelector('#trashBulkActions');
 const selectAllTrash = document.querySelector('#selectAllTrash');
@@ -24,16 +23,17 @@ const restoreSelectedButton = document.querySelector('#restoreSelectedButton');
 
 const MAX_FILES = 10;
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
-const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'video/mp4', 'video/webm', 'video/quicktime']);
+const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+const ALLOWED_VIDEO_TYPES = new Set(['video/mp4', 'video/webm', 'video/quicktime']);
 let posts = [];
 let activeFilter = '전체';
-let selectedFiles = [];
-let objectUrls = [];
+const composerUploads = [];
+const savedEditorRanges = new WeakMap();
+let activeRichEditor = null;
 let dialogPost = null;
 let dialogIndex = 0;
 let isAdmin = false;
 let selectedTrashIds = new Set();
-let editingPostId = null;
 
 loadPosts();
 refreshAdminStatus();
@@ -136,11 +136,18 @@ function createPostCard(post, index) {
   media.className = 'post-media';
   if (post.media?.length) {
     post.media.slice(0, 4).forEach((item, mediaIndex) => {
-      const tile = document.createElement('button');
-      tile.type = 'button';
+      const tile = item.type === 'file' ? document.createElement('a') : document.createElement('button');
+      if (item.type !== 'file') tile.type = 'button';
       tile.className = `media-tile media-count-${Math.min(post.media.length, 4)}`;
-      tile.setAttribute('aria-label', `${post.title} 미디어 ${mediaIndex + 1} 보기`);
-      if (item.type === 'video') {
+      if (item.type === 'file') {
+        tile.classList.add('file-media-tile');
+        tile.href = item.url;
+        tile.setAttribute('aria-label', `${item.name || '첨부 파일'} 다운로드`);
+        const icon = document.createElement('span'); icon.className = 'file-media-icon'; icon.textContent = '↓';
+        const name = document.createElement('span'); name.className = 'file-media-name'; name.textContent = item.name || '첨부 파일';
+        tile.append(icon, name);
+      } else if (item.type === 'video') {
+        tile.setAttribute('aria-label', `${post.title} 동영상 ${mediaIndex + 1} 보기`);
         const video = document.createElement('video');
         video.src = item.url;
         video.preload = 'metadata';
@@ -152,6 +159,7 @@ function createPostCard(post, index) {
         play.textContent = '▶';
         tile.append(play);
       } else {
+        tile.setAttribute('aria-label', `${post.title} 사진 ${mediaIndex + 1} 보기`);
         const image = document.createElement('img');
         image.src = item.url;
         image.alt = item.name || post.title;
@@ -164,7 +172,10 @@ function createPostCard(post, index) {
         more.textContent = `+${post.media.length - 4}`;
         tile.append(more);
       }
-      tile.addEventListener('click', () => openMedia(post, mediaIndex));
+      if (item.type !== 'file') {
+        const visualIndex = post.media.slice(0, mediaIndex).filter(mediaItem => mediaItem.type !== 'file').length;
+        tile.addEventListener('click', () => openMedia(post, visualIndex));
+      }
       media.append(tile);
     });
   } else {
@@ -253,7 +264,7 @@ function formatDate(value) {
 }
 
 function openMedia(post, startIndex) {
-  dialogPost = post;
+  dialogPost = { ...post, media: post.media.filter(item => item.type !== 'file') };
   dialogIndex = startIndex;
   renderDialogMedia();
   dialog.showModal();
@@ -307,59 +318,193 @@ document.querySelectorAll('.filter-chip').forEach(button => {
 });
 document.querySelector('#searchInput').addEventListener('input', renderPosts);
 
-let savedEditorRange = null;
 document.addEventListener('selectionchange', () => {
   const selection = window.getSelection();
-  if (selection?.rangeCount && editor.contains(selection.anchorNode)) savedEditorRange = selection.getRangeAt(0).cloneRange();
+  if (activeRichEditor && selection?.rangeCount && activeRichEditor.contains(selection.anchorNode)) {
+    savedEditorRanges.set(activeRichEditor, selection.getRangeAt(0).cloneRange());
+  }
 });
-function restoreEditorSelection() {
-  if (!savedEditorRange || !editor.contains(savedEditorRange.commonAncestorContainer)) return;
-  editor.focus();
+
+function restoreEditorSelection(target) {
+  const range = savedEditorRanges.get(target);
+  if (!range || !target.contains(range.commonAncestorContainer)) return null;
+  target.focus();
   const selection = window.getSelection();
   selection.removeAllRanges();
-  selection.addRange(savedEditorRange);
+  selection.addRange(range);
+  return range;
 }
-function styleSelection(property, value) {
-  restoreEditorSelection();
-  if (!savedEditorRange || savedEditorRange.collapsed) return;
+
+function styleSelection(target, property, value) {
+  const range = restoreEditorSelection(target);
+  if (!range || range.collapsed) return;
   const span = document.createElement('span');
   span.style[property] = value;
-  span.append(savedEditorRange.extractContents());
-  savedEditorRange.insertNode(span);
+  span.append(range.extractContents());
+  range.insertNode(span);
   const selection = window.getSelection();
   selection.removeAllRanges();
-  const range = document.createRange();
-  range.selectNodeContents(span);
-  selection.addRange(range);
-  savedEditorRange = range.cloneRange();
+  const selected = document.createRange();
+  selected.selectNodeContents(span);
+  selection.addRange(selected);
+  savedEditorRanges.set(target, selected.cloneRange());
 }
-const editorToolbar = document.querySelector('.editor-toolbar');
-editorToolbar.addEventListener('mousedown', event => {
-  if (event.target.closest('button')) event.preventDefault();
-});
-editorToolbar.querySelectorAll('[data-command]').forEach(button => button.addEventListener('click', () => {
-  restoreEditorSelection();
-  document.execCommand(button.dataset.command, false);
-  editor.focus();
-}));
-editorToolbar.querySelectorAll('[data-align]').forEach(button => button.addEventListener('click', () => {
-  restoreEditorSelection();
-  document.execCommand(`justify${button.dataset.align[0].toUpperCase()}${button.dataset.align.slice(1)}`, false);
-  editor.focus();
-}));
-document.querySelector('[data-block="h2"]').addEventListener('click', () => {
-  restoreEditorSelection();
-  document.execCommand('formatBlock', false, 'h2');
-  editor.focus();
-});
-document.querySelector('#fontFamily').addEventListener('change', event => styleSelection('fontFamily', event.target.value));
-document.querySelector('#fontSize').addEventListener('change', event => {
-  const input = event.currentTarget;
-  const size = Math.min(48, Math.max(12, Number.parseInt(input.value, 10) || 16));
-  input.value = String(size);
-  styleSelection('fontSize', `${size}px`);
-});
-document.querySelector('#fontColor').addEventListener('input', event => styleSelection('color', event.target.value));
+
+function wireEditorToolbar(toolbar, target, queue, queueChanged, existingMediaCount = 0) {
+  target.addEventListener('focusin', () => { activeRichEditor = target; });
+  toolbar.addEventListener('mousedown', event => {
+    if (event.target.closest('button')) event.preventDefault();
+  });
+  toolbar.querySelectorAll('[data-command]').forEach(button => button.addEventListener('click', () => {
+    restoreEditorSelection(target);
+    document.execCommand(button.dataset.command, false);
+    target.focus();
+  }));
+  toolbar.querySelectorAll('[data-align]').forEach(button => button.addEventListener('click', () => {
+    restoreEditorSelection(target);
+    document.execCommand(`justify${button.dataset.align[0].toUpperCase()}${button.dataset.align.slice(1)}`, false);
+    target.focus();
+  }));
+  toolbar.querySelector('[data-block="h2"]')?.addEventListener('click', () => {
+    restoreEditorSelection(target);
+    document.execCommand('formatBlock', false, 'h2');
+    target.focus();
+  });
+  toolbar.querySelector('[data-font-family]')?.addEventListener('change', event => styleSelection(target, 'fontFamily', event.currentTarget.value));
+  toolbar.querySelector('[data-font-weight]')?.addEventListener('change', event => styleSelection(target, 'fontWeight', event.currentTarget.value));
+  toolbar.querySelector('[data-font-size]')?.addEventListener('change', event => {
+    const input = event.currentTarget;
+    const size = Math.min(48, Math.max(12, Number.parseInt(input.value, 10) || 16));
+    input.value = String(size);
+    styleSelection(target, 'fontSize', `${size}px`);
+  });
+  toolbar.querySelector('[data-font-color]')?.addEventListener('input', event => styleSelection(target, 'color', event.currentTarget.value));
+  toolbar.querySelectorAll('[data-open-picker]').forEach(button => button.addEventListener('click', () => {
+    toolbar.querySelector(`[data-file-input="${button.dataset.openPicker}"]`)?.click();
+  }));
+  toolbar.querySelectorAll('[data-file-input]').forEach(input => input.addEventListener('change', () => {
+    queueInlineFiles(input.files, input.dataset.fileInput, target, queue, queueChanged, existingMediaCount);
+    input.value = '';
+  }));
+}
+
+function queueInlineFiles(fileList, pickerType, target, queue, queueChanged, existingMediaCount = 0) {
+  const files = Array.from(fileList || []);
+  const rejected = files.find(file => file.size > MAX_FILE_SIZE ||
+    (pickerType === 'image' && !ALLOWED_IMAGE_TYPES.has(file.type)) ||
+    (pickerType === 'video' && !ALLOWED_VIDEO_TYPES.has(file.type)));
+  if (rejected) {
+    showEditorFeedback(target, `${rejected.name}: ${rejected.size > MAX_FILE_SIZE ? '파일당 최대 크기는 50MB입니다.' : '지원하지 않는 형식입니다.'}`, true);
+    return;
+  }
+  const duplicates = new Set(queue.map(item => `${item.file.name}:${item.file.size}:${item.file.lastModified}`));
+  const additions = files.filter(file => {
+    const key = `${file.name}:${file.size}:${file.lastModified}`;
+    if (duplicates.has(key)) return false;
+    duplicates.add(key); return true;
+  });
+  if (existingMediaCount + queue.length + additions.length > MAX_FILES) {
+    showEditorFeedback(target, '한 게시물에는 최대 10개까지 첨부할 수 있어요.', true);
+    return;
+  }
+  additions.forEach(file => {
+    const type = ALLOWED_IMAGE_TYPES.has(file.type) ? 'image' : ALLOWED_VIDEO_TYPES.has(file.type) ? 'video' : 'file';
+    const token = globalThis.crypto?.randomUUID?.() || 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, char => {
+      const value = Math.random() * 16 | 0; return (char === 'x' ? value : (value & 0x3 | 0x8)).toString(16);
+    });
+    const item = { file, token, type, element: null, previewUrl: type === 'file' ? '' : URL.createObjectURL(file) };
+    item.element = makeInlineAttachment(item);
+    insertNodeAtEditorSelection(target, item.element, type === 'file');
+    queue.push(item);
+  });
+  showEditorFeedback(target, '', false);
+  queueChanged();
+}
+
+function showEditorFeedback(target, text, isError) {
+  if (target.closest('#postDetail')) {
+    const message = detailView.querySelector('.inline-edit-message');
+    if (message) { message.textContent = text; message.classList.toggle('notice-error', isError); message.hidden = !text; }
+    return;
+  }
+  if (text) showFormMessage(text, isError); else clearFormMessage();
+}
+
+function makeInlineAttachment(item) {
+  let node;
+  if (item.type === 'image') {
+    node = document.createElement('img');
+    node.src = item.previewUrl; node.alt = item.file.name; node.loading = 'lazy'; node.className = 'inline-body-image';
+  } else if (item.type === 'video') {
+    node = document.createElement('video');
+    node.src = item.previewUrl; node.controls = true; node.playsInline = true; node.preload = 'metadata'; node.className = 'inline-body-video';
+  } else {
+    node = document.createElement('a');
+    node.href = '#'; node.textContent = `↓ ${item.file.name}`; node.className = 'inline-body-file';
+    node.addEventListener('click', event => event.preventDefault());
+  }
+  node.dataset.uploadToken = item.token;
+  node.dataset.originalName = item.file.name;
+  return node;
+}
+
+function insertNodeAtEditorSelection(target, node, isFile) {
+  target.focus();
+  let range = savedEditorRanges.get(target);
+  if (!range || !target.contains(range.commonAncestorContainer)) {
+    range = document.createRange(); range.selectNodeContents(target); range.collapse(false);
+  }
+  range.deleteContents();
+  range.insertNode(node);
+  if (isFile) {
+    const spacer = document.createTextNode('\u00a0');
+    node.after(spacer);
+    range.setStartAfter(spacer);
+  } else {
+    const lineBreak = document.createElement('br');
+    node.after(lineBreak);
+    range.setStartAfter(lineBreak);
+  }
+  range.collapse(true);
+  const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+  savedEditorRanges.set(target, range.cloneRange());
+  activeRichEditor = target;
+}
+
+function renderUploadQueue(container, queue, target) {
+  container.replaceChildren();
+  queue.forEach(item => {
+    const row = document.createElement('div'); row.className = 'preview-item';
+    if (item.type !== 'file') {
+      const preview = item.type === 'video' ? document.createElement('video') : document.createElement('img');
+      preview.src = item.previewUrl;
+      if (item.type === 'video') { preview.muted = true; preview.playsInline = true; }
+      else preview.alt = '';
+      row.append(preview);
+    } else {
+      const icon = document.createElement('span'); icon.className = 'queued-file-icon'; icon.textContent = 'FILE'; row.append(icon);
+    }
+    const details = document.createElement('div'); details.className = 'preview-details';
+    const name = document.createElement('strong'); name.textContent = item.file.name;
+    const size = document.createElement('span'); size.textContent = `${item.type.toUpperCase()} · ${formatBytes(item.file.size)}`;
+    details.append(name, size);
+    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'remove-file'; remove.setAttribute('aria-label', `${item.file.name} 첨부 취소`); remove.textContent = '×';
+    remove.addEventListener('click', () => {
+      item.element.remove();
+      if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      queue.splice(queue.indexOf(item), 1);
+      renderUploadQueue(container, queue, target);
+    });
+    row.append(details, remove); container.append(row);
+  });
+}
+
+function renderPreviews() { renderUploadQueue(previewList, composerUploads, editor); }
+function clearUploadQueue(queue) {
+  queue.forEach(item => { if (item.previewUrl) URL.revokeObjectURL(item.previewUrl); });
+  queue.length = 0;
+}
+wireEditorToolbar(document.querySelector('#composerToolbar'), editor, composerUploads, renderPreviews);
 
 window.addEventListener('hashchange', syncPageFromHash);
 syncPageFromHash();
@@ -368,9 +513,12 @@ function syncPageFromHash() {
   const hash = decodeURIComponent(location.hash.slice(1));
   const isDetail = hash.startsWith('post/');
   const isTrash = hash === 'trash';
-  document.querySelectorAll('main > section:not(.page-view)').forEach(section => { section.hidden = isDetail || isTrash; });
+  const isComposer = hash === 'write';
+  document.querySelectorAll('main > section:not(.page-view)').forEach(section => { section.hidden = isDetail || isTrash || isComposer; });
   detailView.hidden = !isDetail;
   trashSection.hidden = !isTrash;
+  composerPage.hidden = !isComposer;
+  if (isComposer) requestAnimationFrame(() => composerPage.scrollIntoView({ block: 'start' }));
   if (isDetail) loadPostDetail(hash.slice('post/'.length));
   if (isTrash) loadTrash();
 }
@@ -391,25 +539,35 @@ async function loadPostDetail(id) {
     back.href = '#work'; back.className = 'detail-back'; back.textContent = '← 작업 아카이브';
     const meta = document.createElement('div'); meta.className = 'post-meta detail-meta';
     const category = document.createElement('span'); category.className = 'category-tag'; category.textContent = post.category || '기타';
+    const categoryEditor = document.createElement('select'); categoryEditor.className = 'detail-category-editor'; categoryEditor.setAttribute('aria-label', '게시물 분류');
+    ['디자인', '사진', '영상', '개발', '기타'].forEach(value => { const option = document.createElement('option'); option.value = value; option.textContent = value; categoryEditor.append(option); });
+    categoryEditor.value = post.category || '기타'; categoryEditor.hidden = true;
     const date = document.createElement('time'); date.dateTime = post.createdAt; date.textContent = formatDate(post.createdAt);
-    meta.append(category, date);
+    meta.append(category, categoryEditor, date);
     const title = document.createElement('h1'); title.className = 'detail-title'; title.textContent = post.title;
     const article = document.createElement('article'); article.className = 'blog-article';
     if (post.bodyHtml) article.innerHTML = post.bodyHtml;
     else if (post.description) { const paragraph = document.createElement('p'); paragraph.textContent = post.description; article.append(paragraph); }
     const media = document.createElement('div'); media.className = 'detail-media-list';
-    (post.media || []).forEach(item => {
+    const bodyTemplate = document.createElement('template'); bodyTemplate.innerHTML = post.bodyHtml || '';
+    const embeddedUrls = new Set(Array.from(bodyTemplate.content.querySelectorAll('img[src],video[src],a[href]'), node => node.getAttribute('src') || node.getAttribute('href')));
+    (post.media || []).filter(item => !embeddedUrls.has(item.url)).forEach(item => {
+      if (item.type === 'file') {
+        const link = document.createElement('a'); link.className = 'detail-file-link'; link.href = item.url; link.textContent = `↓ ${item.name || '첨부 파일 다운로드'}`; media.append(link); return;
+      }
       const node = item.type === 'video' ? document.createElement('video') : document.createElement('img');
       node.src = item.url;
       if (item.type === 'video') { node.controls = true; node.playsInline = true; }
       else { node.alt = item.name || post.title; node.loading = 'lazy'; }
       media.append(node);
     });
-    detailView.append(back, meta, title, media, article);
+    detailView.append(back, meta, title);
+    if (media.childElementCount) detailView.append(media);
+    detailView.append(article);
     if (isAdmin) {
       const actions = document.createElement('div'); actions.className = 'detail-actions';
       const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'edit-post-button'; edit.textContent = '게시물 수정';
-      edit.addEventListener('click', () => beginPostEdit(post));
+      edit.addEventListener('click', () => beginInlinePostEdit(post, { title, category, categoryEditor, article }));
       actions.append(edit);
       const remove = document.createElement('button'); remove.className = 'delete-post-button'; remove.textContent = '휴지통으로 이동';
       remove.addEventListener('click', async () => {
@@ -431,46 +589,59 @@ async function loadPostDetail(id) {
   }
 }
 
-function beginPostEdit(post) {
+function beginInlinePostEdit(post, elements) {
   if (!isAdmin) return;
-  editingPostId = post._id;
-  postForm.reset();
-  document.querySelector('#titleInput').value = post.title || '';
-  document.querySelector('#categoryInput').value = post.category || '기타';
-  editor.innerHTML = post.bodyHtml || '';
-  if (!post.bodyHtml && post.description) {
-    const paragraph = document.createElement('p'); paragraph.textContent = post.description; editor.append(paragraph);
-  }
-  savedEditorRange = null;
-  selectedFiles = [];
-  renderPreviews();
-  clearFormMessage();
-  const existingMediaNotice = document.querySelector('#existingMediaNotice');
-  const mediaCount = (post.media || []).length;
-  existingMediaNotice.textContent = mediaCount ? `기존 첨부 파일 ${mediaCount}개는 그대로 유지됩니다. 새 파일을 추가로 첨부할 수도 있어요.` : '';
-  existingMediaNotice.hidden = mediaCount === 0;
-  document.querySelector('#writeModeLabel').textContent = 'EDIT PROJECT ENTRY';
-  document.querySelector('#submitButtonLabel').textContent = '수정 사항 저장';
-  document.querySelector('#cancelEditButton').hidden = false;
-  location.hash = 'write';
-  window.setTimeout(() => document.querySelector('#titleInput').focus({ preventScroll: true }), 0);
+  const queue = [];
+  const toolbar = document.querySelector('#composerToolbar').cloneNode(true);
+  toolbar.removeAttribute('id'); toolbar.classList.add('detail-editor-toolbar');
+  elements.title.contentEditable = 'true'; elements.title.classList.add('title-editing');
+  elements.title.setAttribute('role', 'textbox'); elements.title.setAttribute('aria-label', '게시물 제목');
+  elements.category.hidden = true; elements.categoryEditor.hidden = false;
+  elements.article.contentEditable = 'true'; elements.article.setAttribute('role', 'textbox'); elements.article.setAttribute('aria-label', '게시물 본문 편집');
+  elements.article.classList.add('article-editing');
+  const queuePanel = document.createElement('div'); queuePanel.className = 'preview-list inline-edit-uploads';
+  const message = document.createElement('p'); message.className = 'inline-edit-message'; message.hidden = true; message.setAttribute('role', 'status');
+  const actions = document.createElement('div'); actions.className = 'inline-edit-actions';
+  const save = document.createElement('button'); save.type = 'button'; save.className = 'edit-post-button'; save.textContent = '수정 내용 저장';
+  const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'cancel-edit-button'; cancel.textContent = '취소';
+  actions.append(save, cancel);
+  elements.article.before(toolbar);
+  elements.article.after(queuePanel, message, actions);
+  const updateQueue = () => renderUploadQueue(queuePanel, queue, elements.article);
+  wireEditorToolbar(toolbar, elements.article, queue, updateQueue, (post.media || []).length);
+  activeRichEditor = elements.article;
+  save.addEventListener('click', () => saveInlinePostEdit(post, elements, queue, save, cancel, message));
+  cancel.addEventListener('click', () => {
+    clearUploadQueue(queue);
+    loadPostDetail(post._id);
+  });
+  elements.article.focus({ preventScroll: true });
 }
 
-document.querySelector('#cancelEditButton').addEventListener('click', () => {
-  const postId = editingPostId;
-  editingPostId = null;
-  postForm.reset();
-  editor.replaceChildren();
-  savedEditorRange = null;
-  selectedFiles = [];
-  renderPreviews();
-  document.querySelector('#existingMediaNotice').hidden = true;
-  document.querySelector('#writeModeLabel').textContent = 'NEW PROJECT ENTRY';
-  document.querySelector('#submitButtonLabel').textContent = '게시물 등록하기';
-  document.querySelector('#cancelEditButton').hidden = true;
-  clearFormMessage();
-  location.hash = postId ? `post/${postId}` : 'write';
-});
+async function saveInlinePostEdit(post, elements, queue, saveButton, cancelButton, message) {
+  const title = elements.title.innerText.trim();
+  const bodyText = elements.article.innerText.trim();
+  if (!title) { message.textContent = '게시물 제목을 입력해주세요.'; message.hidden = false; return; }
+  if (bodyText.length > 5000 || elements.article.innerHTML.length > 30000) { message.textContent = '본문은 5,000자까지 작성할 수 있어요.'; message.hidden = false; return; }
+  const form = new FormData();
+  form.set('title', title); form.set('category', elements.categoryEditor.value); form.set('bodyHtml', elements.article.innerHTML);
+  form.set('inlineMedia', JSON.stringify(queue.map(item => ({ token: item.token }))));
+  queue.forEach(item => form.append('media', item.file));
+  saveButton.disabled = true; cancelButton.disabled = true; saveButton.textContent = '저장 중…'; message.hidden = true;
+  try {
+    const response = await fetch(`/api/posts/${encodeURIComponent(post._id)}`, { method: 'PUT', body: form });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.message || '게시물을 수정하지 못했습니다.');
+    const index = posts.findIndex(item => item._id === data.post._id);
+    if (index >= 0) posts[index] = data.post; else posts.unshift(data.post);
+    clearUploadQueue(queue);
+    renderPosts();
+    loadPostDetail(data.post._id);
+  } catch (error) {
+    message.textContent = error.message || '게시물을 수정하지 못했습니다.'; message.hidden = false;
+    saveButton.disabled = false; cancelButton.disabled = false; saveButton.textContent = '수정 내용 저장';
+  }
+}
 
 async function loadTrash() {
   trashList.replaceChildren();
@@ -581,72 +752,6 @@ function plainText(html) {
   const element = document.createElement('div'); element.innerHTML = html || ''; return element.textContent || '';
 }
 
-document.querySelector('#chooseImages').addEventListener('click', () => imageInput.click());
-document.querySelector('#chooseVideos').addEventListener('click', () => videoInput.click());
-[[imageInput, 'image/'], [videoInput, 'video/']].forEach(([input, expectedType]) => {
-  input.addEventListener('change', () => {
-    addFiles(input.files, expectedType);
-    input.value = '';
-  });
-});
-const dropZone = document.querySelector('#dropZone');
-dropZone.addEventListener('dragover', event => { event.preventDefault(); dropZone.classList.add('drag-over'); });
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
-dropZone.addEventListener('drop', event => {
-  event.preventDefault();
-  dropZone.classList.remove('drag-over');
-  addFiles(event.dataTransfer.files);
-});
-
-function addFiles(fileList, expectedType = '') {
-  const incoming = Array.from(fileList || []);
-  const current = new Set(selectedFiles.map(file => `${file.name}:${file.size}:${file.lastModified}`));
-  const invalid = incoming.find(file => !ALLOWED_TYPES.has(file.type) || (expectedType && !file.type.startsWith(expectedType)));
-  if (invalid) return showFormMessage(`${invalid.name}: 지원하지 않는 사진 또는 동영상 형식입니다.`, true);
-  const oversized = incoming.find(file => file.size > MAX_FILE_SIZE);
-  if (oversized) return showFormMessage(`${oversized.name}: 파일당 최대 크기는 50MB입니다.`, true);
-  const additions = [];
-  incoming.forEach(file => {
-    const identity = `${file.name}:${file.size}:${file.lastModified}`;
-    if (!current.has(identity)) { current.add(identity); additions.push(file); }
-  });
-  if (selectedFiles.length + additions.length > MAX_FILES) return showFormMessage('한 게시물에는 최대 10개까지 첨부할 수 있어요.', true);
-  selectedFiles.push(...additions);
-  clearFormMessage();
-  renderPreviews();
-}
-
-function renderPreviews() {
-  objectUrls.forEach(URL.revokeObjectURL);
-  objectUrls = [];
-  previewList.replaceChildren();
-  selectedFiles.forEach((file, index) => {
-    const item = document.createElement('div');
-    item.className = 'preview-item';
-    const url = URL.createObjectURL(file);
-    objectUrls.push(url);
-    const preview = file.type.startsWith('video/') ? document.createElement('video') : document.createElement('img');
-    preview.src = url;
-    if (preview.tagName === 'VIDEO') { preview.muted = true; preview.playsInline = true; }
-    else preview.alt = '';
-    const details = document.createElement('div');
-    details.className = 'preview-details';
-    const name = document.createElement('strong');
-    name.textContent = file.name;
-    const size = document.createElement('span');
-    size.textContent = `${file.type.startsWith('video/') ? 'VIDEO' : 'IMAGE'} · ${formatBytes(file.size)}`;
-    details.append(name, size);
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'remove-file';
-    remove.setAttribute('aria-label', `${file.name} 첨부 취소`);
-    remove.textContent = '×';
-    remove.addEventListener('click', () => { selectedFiles.splice(index, 1); renderPreviews(); });
-    item.append(preview, details, remove);
-    previewList.append(item);
-  });
-}
-
 function formatBytes(bytes) {
   return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
@@ -654,52 +759,39 @@ function formatBytes(bytes) {
 postForm.addEventListener('submit', async event => {
   event.preventDefault();
   if (!postForm.reportValidity()) return;
-  const isEditing = Boolean(editingPostId);
-  const postId = editingPostId;
   const bodyText = editor.innerText.trim();
   if (bodyText.length > 5000) return showFormMessage('본문은 5,000자까지 작성할 수 있어요.', true);
   const payload = new FormData();
   payload.set('title', document.querySelector('#titleInput').value.trim());
   payload.set('category', document.querySelector('#categoryInput').value);
   payload.set('bodyHtml', editor.innerHTML);
-  selectedFiles.forEach(file => payload.append('media', file));
+  payload.set('inlineMedia', JSON.stringify(composerUploads.map(item => ({ token: item.token }))));
+  composerUploads.forEach(item => payload.append('media', item.file));
   submitButton.disabled = true;
   document.querySelector('#submitButtonLabel').textContent = '게시물을 저장하고 있어요…';
   clearFormMessage();
   try {
-    const response = await fetch(isEditing ? `/api/posts/${encodeURIComponent(postId)}` : '/api/posts', { method: isEditing ? 'PUT' : 'POST', body: payload });
+    const response = await fetch('/api/posts', { method: 'POST', body: payload });
     const data = await response.json();
-    if (!response.ok || !data.success) throw new Error(data.message || (isEditing ? '게시물을 수정하지 못했습니다.' : '게시물을 저장하지 못했습니다.'));
-    if (isEditing) {
-      const index = posts.findIndex(post => post._id === data.post._id);
-      if (index >= 0) posts[index] = data.post;
-      else posts.unshift(data.post);
-      editingPostId = null;
-    } else posts.unshift(data.post);
+    if (!response.ok || !data.success) throw new Error(data.message || '게시물을 저장하지 못했습니다.');
+    posts.unshift(data.post);
     postForm.reset();
     editor.innerHTML = '';
-    savedEditorRange = null;
-    selectedFiles = [];
+    savedEditorRanges.delete(editor);
+    activeRichEditor = null;
+    clearUploadQueue(composerUploads);
     renderPreviews();
-    document.querySelector('#existingMediaNotice').hidden = true;
-    document.querySelector('#writeModeLabel').textContent = 'NEW PROJECT ENTRY';
     document.querySelector('#submitButtonLabel').textContent = '게시물 등록하기';
-    document.querySelector('#cancelEditButton').hidden = true;
     activeFilter = '전체';
     document.querySelectorAll('.filter-chip').forEach(button => button.classList.toggle('active', button.dataset.filter === '전체'));
     document.querySelector('#searchInput').value = '';
     renderPosts();
-    if (isEditing) {
-      location.hash = `post/${data.post._id}`;
-    } else {
-      showFormMessage('작업이 아카이브에 등록됐어요.');
-      document.querySelector('#work').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
+    location.hash = `post/${data.post._id}`;
   } catch (error) {
-    showFormMessage(error.message || (isEditing ? '게시물을 수정하지 못했습니다. 다시 시도해 주세요.' : '게시물을 저장하지 못했습니다. 다시 시도해 주세요.'), true);
+    showFormMessage(error.message || '게시물을 저장하지 못했습니다. 다시 시도해 주세요.', true);
   } finally {
     submitButton.disabled = false;
-    document.querySelector('#submitButtonLabel').textContent = editingPostId ? '수정 사항 저장' : '게시물 등록하기';
+    document.querySelector('#submitButtonLabel').textContent = '게시물 등록하기';
   }
 });
 

@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 
 const MediaSchema = new mongoose.Schema({
   fileId: { type: mongoose.Schema.Types.ObjectId, required: true },
-  type: { type: String, enum: ['image', 'video'], required: true },
+  type: { type: String, enum: ['image', 'video', 'file'], required: true },
   name: { type: String, default: '' },
   size: { type: Number, default: 0 }
 }, { _id: false });
