@@ -29,6 +29,7 @@ let posts = [];
 let activeFilter = '전체';
 const composerUploads = [];
 const savedEditorRanges = new WeakMap();
+const editorToolbars = new WeakMap();
 let activeRichEditor = null;
 let dialogPost = null;
 let dialogIndex = 0;
@@ -322,8 +323,33 @@ document.addEventListener('selectionchange', () => {
   const selection = window.getSelection();
   if (activeRichEditor && selection?.rangeCount && activeRichEditor.contains(selection.anchorNode)) {
     savedEditorRanges.set(activeRichEditor, selection.getRangeAt(0).cloneRange());
+    syncEditorToolbar(activeRichEditor);
   }
 });
+
+function syncEditorToolbar(target) {
+  const toolbar = editorToolbars.get(target);
+  const range = savedEditorRanges.get(target);
+  if (!toolbar || !range || toolbar.contains(document.activeElement)) return;
+  let node = range.startContainer;
+  if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+  if (!node || !target.contains(node)) node = target;
+  const style = window.getComputedStyle(node);
+  const size = toolbar.querySelector('[data-font-size]');
+  const weight = toolbar.querySelector('[data-font-weight]');
+  const family = toolbar.querySelector('[data-font-family]');
+  if (size) size.value = String(Math.round(Number.parseFloat(style.fontSize)) || 16);
+  if (weight) {
+    const computedWeight = Number.parseInt(style.fontWeight, 10) || 400;
+    weight.value = String([300, 400, 500, 600, 700, 800, 900].reduce((closest, value) =>
+      Math.abs(value - computedWeight) < Math.abs(closest - computedWeight) ? value : closest, 300));
+  }
+  if (family) {
+    const computedFamily = style.fontFamily.replace(/^["']|["']$/g, '').split(',')[0].trim();
+    const match = Array.from(family.options).find(option => option.value.toLowerCase() === computedFamily.toLowerCase());
+    if (match) family.value = match.value;
+  }
+}
 
 function restoreEditorSelection(target) {
   const range = savedEditorRanges.get(target);
@@ -351,6 +377,7 @@ function styleSelection(target, property, value) {
 }
 
 function wireEditorToolbar(toolbar, target, queue, queueChanged, existingMediaCount = 0) {
+  editorToolbars.set(target, toolbar);
   target.addEventListener('focusin', () => { activeRichEditor = target; });
   toolbar.addEventListener('mousedown', event => {
     if (event.target.closest('button')) event.preventDefault();
@@ -372,11 +399,22 @@ function wireEditorToolbar(toolbar, target, queue, queueChanged, existingMediaCo
   });
   toolbar.querySelector('[data-font-family]')?.addEventListener('change', event => styleSelection(target, 'fontFamily', event.currentTarget.value));
   toolbar.querySelector('[data-font-weight]')?.addEventListener('change', event => styleSelection(target, 'fontWeight', event.currentTarget.value));
-  toolbar.querySelector('[data-font-size]')?.addEventListener('change', event => {
+  const sizeInput = toolbar.querySelector('[data-font-size]');
+  sizeInput?.addEventListener('input', event => {
     const input = event.currentTarget;
-    const size = Math.min(48, Math.max(12, Number.parseInt(input.value, 10) || 16));
-    input.value = String(size);
+    const parsed = Number.parseInt(input.value, 10);
+    if (!Number.isFinite(parsed) || parsed < 12 || parsed > 48) return;
+    const size = parsed;
     styleSelection(target, 'fontSize', `${size}px`);
+    input.dataset.appliedSize = String(size);
+  });
+  sizeInput?.addEventListener('change', event => {
+    const input = event.currentTarget;
+    const parsed = Number.parseInt(input.value, 10);
+    const size = Math.min(48, Math.max(12, Number.isFinite(parsed) ? parsed : 16));
+    input.value = String(size);
+    if (input.dataset.appliedSize !== String(size)) styleSelection(target, 'fontSize', `${size}px`);
+    delete input.dataset.appliedSize;
   });
   toolbar.querySelector('[data-font-color]')?.addEventListener('input', event => styleSelection(target, 'color', event.currentTarget.value));
   toolbar.querySelectorAll('[data-open-picker]').forEach(button => button.addEventListener('click', () => {
@@ -630,7 +668,7 @@ async function saveInlinePostEdit(post, elements, queue, saveButton, cancelButto
   saveButton.disabled = true; cancelButton.disabled = true; saveButton.textContent = '저장 중…'; message.hidden = true;
   try {
     const response = await fetch(`/api/posts/${encodeURIComponent(post._id)}`, { method: 'PUT', body: form });
-    const data = await response.json();
+    const data = await readApiResponse(response);
     if (!response.ok || !data.success) throw new Error(data.message || '게시물을 수정하지 못했습니다.');
     const index = posts.findIndex(item => item._id === data.post._id);
     if (index >= 0) posts[index] = data.post; else posts.unshift(data.post);
@@ -772,7 +810,7 @@ postForm.addEventListener('submit', async event => {
   clearFormMessage();
   try {
     const response = await fetch('/api/posts', { method: 'POST', body: payload });
-    const data = await response.json();
+    const data = await readApiResponse(response);
     if (!response.ok || !data.success) throw new Error(data.message || '게시물을 저장하지 못했습니다.');
     posts.unshift(data.post);
     postForm.reset();
@@ -799,6 +837,14 @@ function showFormMessage(message, isError = false) {
   formMessage.textContent = message;
   formMessage.classList.toggle('error', isError);
   formMessage.hidden = false;
+}
+async function readApiResponse(response) {
+  const text = await response.text();
+  let data;
+  try { data = JSON.parse(text); }
+  catch { throw new Error(text.trim().slice(0, 240) || `서버 응답을 읽지 못했습니다. (HTTP ${response.status})`); }
+  if (!response.ok || !data.success) throw new Error(data.message || `저장하지 못했습니다. (HTTP ${response.status})`);
+  return data;
 }
 function clearFormMessage() { formMessage.hidden = true; formMessage.textContent = ''; }
 

@@ -289,6 +289,7 @@ app.post('/api/posts', requireAdmin, upload.array('media', 10), async (req, res)
     await cleanupTempFiles(req.files);
     res.status(201).json({ success: true, post: serializePost(post) });
   } catch (err) {
+    console.error('게시물 저장 실패:', err);
     await Promise.all([
       cleanupTempFiles(req.files),
       cleanupGridFsFiles(uploadedIds)
@@ -341,6 +342,7 @@ app.put('/api/posts/:id', requireAdmin, upload.array('media', 10), async (req, r
     await cleanupTempFiles(req.files);
     res.json({ success: true, post: serializePost(post) });
   } catch (err) {
+    console.error('게시물 수정 실패:', err);
     await Promise.all([cleanupTempFiles(req.files), cleanupGridFsFiles(uploadedIds)]);
     res.status(500).json({ success: false, message: '게시물을 수정하지 못했습니다.' });
   }
