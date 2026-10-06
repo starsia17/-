@@ -164,6 +164,22 @@ app.delete('/api/posts/:id', requireAdmin, async (req, res) => {
   }
 });
 
+app.post('/api/trash/restore', requireAdmin, async (req, res) => {
+  const ids = req.body?.ids;
+  if (!Array.isArray(ids) || ids.length < 1 || ids.length > 100 || ids.some(id => typeof id !== 'string' || !/^[a-f\d]{24}$/i.test(id))) {
+    return res.status(400).json({ success: false, message: '복원할 게시물을 올바르게 선택해 주세요.' });
+  }
+  try {
+    const result = await PortfolioPost.updateMany(
+      { _id: { $in: ids }, deletedAt: { $ne: null } },
+      { $set: { deletedAt: null, expiresAt: null } }
+    );
+    res.json({ success: true, restored: result.modifiedCount });
+  } catch (err) {
+    res.status(500).json({ success: false, message: '게시물을 복원하지 못했습니다.' });
+  }
+});
+
 app.post('/api/trash/:id/restore', requireAdmin, async (req, res) => {
   if (!/^[a-f\d]{24}$/i.test(req.params.id)) return res.status(400).json({ success: false, message: '올바르지 않은 게시물 ID입니다.' });
   try {

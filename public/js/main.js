@@ -17,6 +17,10 @@ const editor = document.querySelector('#editor');
 const detailView = document.querySelector('#postDetail');
 const trashSection = document.querySelector('#trashSection');
 const trashList = document.querySelector('#trashList');
+const trashBulkActions = document.querySelector('#trashBulkActions');
+const selectAllTrash = document.querySelector('#selectAllTrash');
+const trashSelectionCount = document.querySelector('#trashSelectionCount');
+const restoreSelectedButton = document.querySelector('#restoreSelectedButton');
 
 const MAX_FILES = 10;
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
@@ -28,6 +32,7 @@ let objectUrls = [];
 let dialogPost = null;
 let dialogIndex = 0;
 let isAdmin = false;
+let selectedTrashIds = new Set();
 
 loadPosts();
 refreshAdminStatus();
@@ -417,6 +422,11 @@ async function loadPostDetail(id) {
 
 async function loadTrash() {
   trashList.replaceChildren();
+  selectedTrashIds = new Set();
+  selectAllTrash.checked = false;
+  selectAllTrash.indeterminate = false;
+  trashBulkActions.hidden = true;
+  updateTrashSelection(0);
   document.querySelector('#trashEmpty').hidden = true;
   if (!isAdmin) {
     trashList.textContent = '휴지통은 관리자 로그인 후 확인할 수 있습니다.';
@@ -426,24 +436,75 @@ async function loadTrash() {
     const response = await fetch('/api/trash');
     const data = await response.json();
     if (!response.ok || !data.success) throw new Error(data.message || '휴지통을 불러오지 못했습니다.');
+    trashBulkActions.hidden = data.posts.length === 0;
     data.posts.forEach(post => {
       const row = document.createElement('article'); row.className = 'trash-row';
+      const selection = document.createElement('label'); selection.className = 'trash-select-label';
+      const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'trash-select';
+      checkbox.value = post._id; checkbox.setAttribute('aria-label', `게시물 ${post.title} 선택`);
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) selectedTrashIds.add(post._id);
+        else selectedTrashIds.delete(post._id);
+        updateTrashSelection(data.posts.length);
+      });
+      selection.append(checkbox);
       const info = document.createElement('div'); info.className = 'trash-row-info';
       const title = document.createElement('strong'); title.textContent = post.title;
       const expiration = document.createElement('span');
       const days = Math.max(0, Math.ceil((new Date(post.expiresAt) - Date.now()) / 86400000));
       expiration.textContent = `${formatDate(post.deletedAt)} 삭제 · ${days}일 후 영구 삭제`;
       info.append(title, expiration);
+      const summary = document.createElement('div'); summary.className = 'trash-row-summary';
+      summary.append(selection, info);
       const actions = document.createElement('div'); actions.className = 'trash-actions';
       const restore = document.createElement('button'); restore.type = 'button'; restore.className = 'restore-button'; restore.textContent = '복원';
       restore.addEventListener('click', () => restorePost(post));
       const erase = document.createElement('button'); erase.type = 'button'; erase.className = 'purge-button'; erase.textContent = '완전히 삭제';
       erase.addEventListener('click', () => permanentlyDeletePost(post));
-      actions.append(restore, erase); row.append(info, actions); trashList.append(row);
+      actions.append(restore, erase); row.append(summary, actions); trashList.append(row);
     });
+    updateTrashSelection(data.posts.length);
     document.querySelector('#trashEmpty').hidden = data.posts.length > 0;
   } catch (error) {
     const message = document.querySelector('#trashMessage'); message.textContent = error.message; message.hidden = false;
+  }
+}
+
+function updateTrashSelection(total) {
+  const selected = selectedTrashIds.size;
+  trashSelectionCount.textContent = selected ? `선택된 게시물 ${selected}개` : '선택된 게시물 없음';
+  restoreSelectedButton.disabled = selected === 0;
+  restoreSelectedButton.textContent = selected ? `선택한 게시물 ${selected}개 복원` : '선택한 게시물 복원';
+  selectAllTrash.checked = total > 0 && selected === total;
+  selectAllTrash.indeterminate = selected > 0 && selected < total;
+}
+
+selectAllTrash.addEventListener('change', () => {
+  const checkboxes = trashList.querySelectorAll('.trash-select');
+  selectedTrashIds = new Set(selectAllTrash.checked ? Array.from(checkboxes, checkbox => checkbox.value) : []);
+  checkboxes.forEach(checkbox => { checkbox.checked = selectAllTrash.checked; });
+  updateTrashSelection(checkboxes.length);
+});
+
+restoreSelectedButton.addEventListener('click', restoreSelectedPosts);
+
+async function restoreSelectedPosts() {
+  const ids = Array.from(selectedTrashIds);
+  if (!ids.length) return;
+  restoreSelectedButton.disabled = true;
+  try {
+    const response = await fetch('/api/trash/restore', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.message || '게시물을 복원하지 못했습니다.');
+    const message = document.querySelector('#trashMessage');
+    message.textContent = `${data.restored}개 게시물을 원래 내용과 함께 홈에 복원했습니다.`;
+    message.hidden = false;
+    await Promise.all([loadTrash(), loadPosts()]);
+  } catch (error) {
+    window.alert(error.message || '게시물을 복원하지 못했습니다.');
+    restoreSelectedButton.disabled = false;
   }
 }
 

@@ -399,7 +399,15 @@ body { background: var(--paper); }
 .trash-section { max-width: 1000px; }
 .trash-intro { margin: -15px 0 26px; color: #758075; font-size: 13px; }
 .trash-list { display: grid; gap: 10px; }
+.trash-bulk-actions { display: flex; align-items: center; gap: 16px; margin: 0 0 16px; padding: 12px 14px; border: 1px solid #e4e8df; border-radius: 7px; background: #f7f8f4; }
+.select-all-label, .trash-select-label { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 42px; min-height: 42px; cursor: pointer; }
+.select-all-label { flex: 0 0 auto; justify-content: flex-start; gap: 9px; color: #455344; font-size: 12px; font-weight: 600; }
+.select-all-label input, .trash-select-label input { width: 18px; height: 18px; margin: 0; accent-color: #6f8d46; cursor: pointer; }
+.trash-selection-count { flex: 1; color: #758075; font-size: 12px; }
+.restore-selected-button { min-height: 42px; padding: 9px 15px; border: 0; border-radius: 4px; background: #29392d; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; }
+.restore-selected-button:disabled { background: #c8cec5; cursor: not-allowed; }
 .trash-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 19px 20px; border: 1px solid #e4e8df; border-radius: 7px; background: #fff; }
+.trash-row-summary { display: flex; align-items: center; min-width: 0; }
 .trash-row-info { display: grid; gap: 7px; min-width: 0; }
 .trash-row-info strong { overflow-wrap: anywhere; font-size: 14px; }
 .trash-row-info span { color: #858e83; font-size: 10px; }
@@ -435,5 +443,93 @@ body { background: var(--paper); }
   .editor-control select { max-width: 95px; padding: 7px 5px; }
   .editor-separator { display: none; }
   .rich-editor { min-height: 220px; padding: 13px; font-size: 15px; }
+}
+
+/* Comfortable editing and reading across laptop, tablet, and phone widths. */
+@media (min-width: 901px) {
+  .post-form, .login-panel { padding: clamp(30px, 3vw, 44px); }
+  .post-form input:not([type=file]):not([type=color]), .post-form select, .login-panel input { font-size: 14px; }
+  .rich-editor { min-height: 420px; padding: 22px; font-size: 16px; }
+  .editor-toolbar { gap: 8px; padding: 11px; }
+  .editor-button, .editor-color { min-width: 40px; min-height: 40px; }
+  .trash-row { padding: 21px 24px; }
+}
+@media (min-width: 621px) and (max-width: 1024px) {
+  .write-section { grid-template-columns: minmax(220px, .8fr) minmax(0, 1.2fr); gap: 5vw; }
+  .post-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  html { scroll-padding-top: 72px; }
+  .topbar { padding-inline: 18px; gap: 12px; }
+  .top-nav { gap: 12px; margin: 0; }
+  .top-nav #trashNav { padding: 7px 9px; }
+  .nav-cta { flex: 0 0 auto; }
+  .write-section { grid-template-columns: minmax(0, 1fr); }
+  .write-intro { position: static; }
+  .post-form, .login-panel { min-width: 0; }
+  .field-hint { white-space: normal; }
+}
+@media (max-width: 620px) {
+  .topbar { height: 62px; padding-inline: 12px; gap: 8px; }
+  .wordmark { gap: 6px; font-size: 10px; letter-spacing: .07em; }
+  .wordmark-mark { width: 23px; height: 23px; }
+  .top-nav { gap: 8px; font-size: 10px; }
+  .top-nav #trashNav { padding: 6px 8px; }
+  .nav-cta span { width: 30px; height: 30px; }
+  .hero-art { margin: 7px 0 0; }
+  .hero { min-height: 0; padding-bottom: 58px; }
+  .write-section { padding: 58px 16px 62px; gap: 24px; }
+  .post-form, .login-panel { padding: 21px 16px; }
+  .form-topline { align-items: center; min-height: 40px; gap: 10px; font-size: 8px; }
+  .logout-button { min-height: 40px; padding: 0 4px; }
+  .post-form input:not([type=file]):not([type=color]), .post-form select, .login-panel input { min-height: 46px; font-size: 16px; }
+  .form-row { align-items: stretch; flex-direction: column; gap: 0; }
+  .form-row .field-hint { max-width: none; padding: 0 0 18px; font-size: 10px; }
+  .editor-toolbar { gap: 5px; margin-top: -13px; padding: 8px; }
+  .editor-control select { max-width: 112px; min-height: 40px; padding: 6px 7px; font-size: 12px; }
+  .editor-button, .editor-color { min-width: 40px; min-height: 40px; }
+  .rich-editor { min-height: 280px; padding: 14px; font-size: 16px; line-height: 1.8; }
+  .upload-label-row { gap: 2px; }
+  .upload-label-row .field-hint { padding-bottom: 10px; font-size: 10px; }
+  .drop-zone { min-height: 150px; padding: 17px 10px; text-align: center; }
+  .drop-zone strong { line-height: 1.6; }
+  .upload-actions { width: 100%; gap: 7px; }
+  .upload-choice { min-height: 44px; flex: 1 1 130px; padding-inline: 10px; font-size: 11px; }
+  .drop-zone > span:last-child { max-width: 260px; line-height: 1.6; }
+  .preview-item { min-height: 60px; }
+  .remove-file { width: 44px; height: 44px; flex: 0 0 44px; }
+  .submit-button { min-height: 50px; }
+  .delete-post-button { min-height: 42px; padding: 9px 12px; }
+  .page-view { padding: 42px 17px 68px; }
+  .detail-title { font-size: clamp(30px, 9vw, 42px); }
+  .detail-meta { font-size: 9px; }
+  .blog-article { font-size: 16px; line-height: 1.85; }
+  .detail-media-list { gap: 12px; }
+  .detail-media-list img, .detail-media-list video { max-height: 70svh; border-radius: 4px; }
+  .trash-section .section-heading { gap: 10px; }
+  .trash-section .section-heading h2 { font-size: 32px; }
+  .trash-section .work-count { max-width: 104px; text-align: right; line-height: 1.5; }
+  .trash-intro { margin-top: -8px; font-size: 12px; line-height: 1.7; }
+  .trash-bulk-actions { flex-wrap: wrap; gap: 4px 10px; padding: 8px 10px; }
+  .select-all-label { min-height: 44px; font-size: 11px; }
+  .trash-selection-count { min-width: 110px; font-size: 11px; }
+  .restore-selected-button { width: 100%; min-height: 46px; margin-top: 4px; }
+  .trash-row { gap: 8px; padding: 12px 10px; }
+  .trash-row-summary { width: 100%; }
+  .trash-select-label { flex-basis: 38px; }
+  .trash-row-info { flex: 1; }
+  .trash-row-info span { line-height: 1.6; }
+  .trash-actions { gap: 7px; }
+  .trash-actions button { min-height: 44px; padding: 8px 6px; font-size: 11px; }
+}
+@media (max-width: 360px) {
+  .topbar { padding-inline: 9px; gap: 5px; }
+  .top-nav { gap: 6px; font-size: 9px; }
+  .top-nav #trashNav { padding-inline: 6px; }
+  .wordmark { font-size: 9px; }
+  .nav-cta span { width: 28px; height: 28px; }
+  .post-form, .login-panel { padding-inline: 13px; }
+  .editor-toolbar { gap: 3px; padding: 6px; }
+  .editor-control select { max-width: 100px; }
 }
 
