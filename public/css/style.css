@@ -157,6 +157,9 @@ button { color: inherit; }
 .submit-button:disabled { cursor: wait; opacity: .7; }
 .submit-button span:last-child { font-size: 17px; }
 .form-footnote { margin: 11px 0 0; color: #899185; text-align: center; font-size: 9px; }
+.existing-media-notice { margin: 10px 0 0; color: #65784b; font-size: 11px; line-height: 1.6; }
+.cancel-edit-button { display: block; width: 100%; min-height: 42px; margin-top: 8px; border: 1px solid #dfe3da; border-radius: 4px; background: transparent; color: #687366; font-size: 11px; cursor: pointer; }
+.cancel-edit-button:hover { background: #eff2ea; }
 .footer { min-height: 86px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px max(6.4vw, calc((100vw - 1320px) / 2)); }
 .footer > span, .footer > a:last-child { color: #858c82; font: 8px var(--mono); letter-spacing: .08em; }
 .media-dialog { width: min(92vw, 1100px); max-width: none; max-height: 94vh; border: 0; padding: 50px 25px 18px; background: #172019; color: white; }
@@ -397,6 +400,10 @@ body { background: var(--paper); }
 .detail-back:hover { color: #3e582a; }
 .detail-meta { max-width: 720px; margin: 0 auto; }
 .detail-title { max-width: 720px; margin: 20px auto 38px; font-size: clamp(34px, 6vw, 56px); line-height: 1.25; letter-spacing: -.055em; overflow-wrap: anywhere; }
+.detail-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 9px; max-width: 720px; margin: 28px auto 0; }
+.detail-actions .delete-post-button { margin: 0; }
+.edit-post-button { min-height: 42px; padding: 9px 14px; border: 1px solid #dfe4d9; border-radius: 4px; background: #fff; color: #4c6041; font-size: 11px; font-weight: 600; cursor: pointer; }
+.edit-post-button:hover { border-color: #9bb875; background: #f3f6ee; }
 .blog-article { max-width: 720px; margin: 44px auto 0; color: #333d35; font: 16px/2 'Noto Sans KR', sans-serif; overflow-wrap: anywhere; }
 .blog-article p { margin: 0 0 1.2em; }
 .blog-article h2 { margin: 1.6em 0 .65em; color: #243328; font-size: 1.6em; line-height: 1.45; }
@@ -427,6 +434,9 @@ body { background: var(--paper); }
 .trash-actions .purge-button:hover { background: #fbf3f0; }
 .editor-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: -16px 0 0; padding: 9px; border: 1px solid #dfe3da; border-bottom: 0; border-radius: 5px 5px 0 0; background: #f2f4ef; }
 .editor-control select { width: auto; max-width: 122px; margin: 0; border: 1px solid #dce1d7; border-radius: 3px; padding: 7px 8px; background: #fff; color: #435044; font-size: 10px; }
+.editor-size-control { display: inline-flex; align-items: center; gap: 5px; min-height: 34px; padding: 3px 8px; border: 1px solid #dce1d7; border-radius: 3px; background: #fff; color: #687366; font-size: 10px; }
+.editor-size-control input { width: 42px !important; min-height: 26px !important; margin: 0 !important; padding: 2px 0 !important; border: 0 !important; outline: 0; background: transparent !important; color: #435044 !important; text-align: center; font-size: 12px !important; font-variant-numeric: tabular-nums; }
+.editor-size-control input::-webkit-inner-spin-button, .editor-size-control input::-webkit-outer-spin-button { opacity: 1; }
 .editor-button { min-width: 31px; height: 31px; padding: 0 8px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: #465244; font-size: 12px; cursor: pointer; }
 .editor-button:hover { border-color: #d7dfce; background: #fff; }
 .editor-color { display: grid; place-items: center; position: relative; width: 31px; height: 31px; border: 1px solid transparent; border-radius: 3px; color: #435044; font-weight: 700; cursor: pointer; }
@@ -498,6 +508,8 @@ body { background: var(--paper); }
   .form-row .field-hint { max-width: none; padding: 0 0 18px; font-size: 10px; }
   .editor-toolbar { gap: 5px; margin-top: -13px; padding: 8px; }
   .editor-control select { max-width: 112px; min-height: 40px; padding: 6px 7px; font-size: 12px; }
+  .editor-size-control { min-height: 40px; }
+  .editor-size-control input { min-height: 32px !important; font-size: 14px !important; }
   .editor-button, .editor-color { min-width: 40px; min-height: 40px; }
   .rich-editor { min-height: 280px; padding: 14px; font-size: 16px; line-height: 1.8; }
   .upload-label-row { gap: 2px; }
@@ -513,6 +525,9 @@ body { background: var(--paper); }
   .delete-post-button { min-height: 42px; padding: 9px 12px; }
   .page-view { padding: 42px 17px 68px; }
   .detail-title { font-size: clamp(30px, 9vw, 42px); }
+  .detail-actions { justify-content: stretch; gap: 8px; }
+  .detail-actions > button { flex: 1; min-height: 44px; }
+  .detail-actions .delete-post-button { margin: 0; }
   .detail-meta { font-size: 9px; }
   .blog-article { font-size: 16px; line-height: 1.85; }
   .detail-media-list { gap: 12px; }
@@ -542,5 +557,7 @@ body { background: var(--paper); }
   .post-form, .login-panel { padding-inline: 13px; }
   .editor-toolbar { gap: 3px; padding: 6px; }
   .editor-control select { max-width: 100px; }
+  .editor-size-control { gap: 3px; padding-inline: 5px; }
+  .editor-size-control input { width: 36px !important; }
 }
 

@@ -33,6 +33,7 @@ let dialogPost = null;
 let dialogIndex = 0;
 let isAdmin = false;
 let selectedTrashIds = new Set();
+let editingPostId = null;
 
 loadPosts();
 refreshAdminStatus();
@@ -352,7 +353,12 @@ document.querySelector('[data-block="h2"]').addEventListener('click', () => {
   editor.focus();
 });
 document.querySelector('#fontFamily').addEventListener('change', event => styleSelection('fontFamily', event.target.value));
-document.querySelector('#fontSize').addEventListener('change', event => styleSelection('fontSize', `${event.target.value}px`));
+document.querySelector('#fontSize').addEventListener('change', event => {
+  const input = event.currentTarget;
+  const size = Math.min(48, Math.max(12, Number.parseInt(input.value, 10) || 16));
+  input.value = String(size);
+  styleSelection('fontSize', `${size}px`);
+});
 document.querySelector('#fontColor').addEventListener('input', event => styleSelection('color', event.target.value));
 
 window.addEventListener('hashchange', syncPageFromHash);
@@ -401,6 +407,10 @@ async function loadPostDetail(id) {
     });
     detailView.append(back, meta, title, media, article);
     if (isAdmin) {
+      const actions = document.createElement('div'); actions.className = 'detail-actions';
+      const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'edit-post-button'; edit.textContent = '게시물 수정';
+      edit.addEventListener('click', () => beginPostEdit(post));
+      actions.append(edit);
       const remove = document.createElement('button'); remove.className = 'delete-post-button'; remove.textContent = '휴지통으로 이동';
       remove.addEventListener('click', async () => {
         if (!window.confirm(`“${post.title}” 게시물을 휴지통으로 이동할까요? 30일 안에 복원할 수 있습니다.`)) return;
@@ -411,7 +421,8 @@ async function loadPostDetail(id) {
           location.hash = 'work'; loadPosts();
         } catch (error) { window.alert(error.message || '게시물을 이동하지 못했습니다.'); }
       });
-      detailView.append(remove);
+      actions.append(remove);
+      detailView.append(actions);
     }
   } catch (error) {
     const message = document.createElement('p'); message.className = 'notice notice-error'; message.textContent = error.message;
@@ -419,6 +430,47 @@ async function loadPostDetail(id) {
     detailView.append(back, message);
   }
 }
+
+function beginPostEdit(post) {
+  if (!isAdmin) return;
+  editingPostId = post._id;
+  postForm.reset();
+  document.querySelector('#titleInput').value = post.title || '';
+  document.querySelector('#categoryInput').value = post.category || '기타';
+  editor.innerHTML = post.bodyHtml || '';
+  if (!post.bodyHtml && post.description) {
+    const paragraph = document.createElement('p'); paragraph.textContent = post.description; editor.append(paragraph);
+  }
+  savedEditorRange = null;
+  selectedFiles = [];
+  renderPreviews();
+  clearFormMessage();
+  const existingMediaNotice = document.querySelector('#existingMediaNotice');
+  const mediaCount = (post.media || []).length;
+  existingMediaNotice.textContent = mediaCount ? `기존 첨부 파일 ${mediaCount}개는 그대로 유지됩니다. 새 파일을 추가로 첨부할 수도 있어요.` : '';
+  existingMediaNotice.hidden = mediaCount === 0;
+  document.querySelector('#writeModeLabel').textContent = 'EDIT PROJECT ENTRY';
+  document.querySelector('#submitButtonLabel').textContent = '수정 사항 저장';
+  document.querySelector('#cancelEditButton').hidden = false;
+  location.hash = 'write';
+  window.setTimeout(() => document.querySelector('#titleInput').focus({ preventScroll: true }), 0);
+}
+
+document.querySelector('#cancelEditButton').addEventListener('click', () => {
+  const postId = editingPostId;
+  editingPostId = null;
+  postForm.reset();
+  editor.replaceChildren();
+  savedEditorRange = null;
+  selectedFiles = [];
+  renderPreviews();
+  document.querySelector('#existingMediaNotice').hidden = true;
+  document.querySelector('#writeModeLabel').textContent = 'NEW PROJECT ENTRY';
+  document.querySelector('#submitButtonLabel').textContent = '게시물 등록하기';
+  document.querySelector('#cancelEditButton').hidden = true;
+  clearFormMessage();
+  location.hash = postId ? `post/${postId}` : 'write';
+});
 
 async function loadTrash() {
   trashList.replaceChildren();
@@ -602,6 +654,8 @@ function formatBytes(bytes) {
 postForm.addEventListener('submit', async event => {
   event.preventDefault();
   if (!postForm.reportValidity()) return;
+  const isEditing = Boolean(editingPostId);
+  const postId = editingPostId;
   const bodyText = editor.innerText.trim();
   if (bodyText.length > 5000) return showFormMessage('본문은 5,000자까지 작성할 수 있어요.', true);
   const payload = new FormData();
@@ -610,28 +664,42 @@ postForm.addEventListener('submit', async event => {
   payload.set('bodyHtml', editor.innerHTML);
   selectedFiles.forEach(file => payload.append('media', file));
   submitButton.disabled = true;
-  submitButton.querySelector('span:first-child').textContent = '게시물을 저장하고 있어요…';
+  document.querySelector('#submitButtonLabel').textContent = '게시물을 저장하고 있어요…';
   clearFormMessage();
   try {
-    const response = await fetch('/api/posts', { method: 'POST', body: payload });
+    const response = await fetch(isEditing ? `/api/posts/${encodeURIComponent(postId)}` : '/api/posts', { method: isEditing ? 'PUT' : 'POST', body: payload });
     const data = await response.json();
-    if (!response.ok || !data.success) throw new Error(data.message || '게시물을 저장하지 못했습니다.');
-    posts.unshift(data.post);
+    if (!response.ok || !data.success) throw new Error(data.message || (isEditing ? '게시물을 수정하지 못했습니다.' : '게시물을 저장하지 못했습니다.'));
+    if (isEditing) {
+      const index = posts.findIndex(post => post._id === data.post._id);
+      if (index >= 0) posts[index] = data.post;
+      else posts.unshift(data.post);
+      editingPostId = null;
+    } else posts.unshift(data.post);
     postForm.reset();
     editor.innerHTML = '';
+    savedEditorRange = null;
     selectedFiles = [];
     renderPreviews();
+    document.querySelector('#existingMediaNotice').hidden = true;
+    document.querySelector('#writeModeLabel').textContent = 'NEW PROJECT ENTRY';
+    document.querySelector('#submitButtonLabel').textContent = '게시물 등록하기';
+    document.querySelector('#cancelEditButton').hidden = true;
     activeFilter = '전체';
     document.querySelectorAll('.filter-chip').forEach(button => button.classList.toggle('active', button.dataset.filter === '전체'));
     document.querySelector('#searchInput').value = '';
     renderPosts();
-    showFormMessage('작업이 아카이브에 등록됐어요.');
-    document.querySelector('#work').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (isEditing) {
+      location.hash = `post/${data.post._id}`;
+    } else {
+      showFormMessage('작업이 아카이브에 등록됐어요.');
+      document.querySelector('#work').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   } catch (error) {
-    showFormMessage(error.message || '게시물을 저장하지 못했습니다. 다시 시도해 주세요.', true);
+    showFormMessage(error.message || (isEditing ? '게시물을 수정하지 못했습니다. 다시 시도해 주세요.' : '게시물을 저장하지 못했습니다. 다시 시도해 주세요.'), true);
   } finally {
     submitButton.disabled = false;
-    submitButton.querySelector('span:first-child').textContent = '게시물 등록하기';
+    document.querySelector('#submitButtonLabel').textContent = editingPostId ? '수정 사항 저장' : '게시물 등록하기';
   }
 });
 

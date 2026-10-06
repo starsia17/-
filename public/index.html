@@ -106,7 +106,7 @@
         </form>
       </section>
       <form id="postForm" class="post-form" hidden>
-        <div class="form-topline"><span>NEW PROJECT ENTRY</span><button id="logoutButton" class="logout-button" type="button">로그아웃 ↗</button></div>
+        <div class="form-topline"><span id="writeModeLabel">NEW PROJECT ENTRY</span><button id="logoutButton" class="logout-button" type="button">로그아웃 ↗</button></div>
         <label class="field-label" for="titleInput">작업 제목 <span>*</span></label>
         <input id="titleInput" name="title" maxlength="120" placeholder="작업의 이름을 적어주세요" required>
         <div class="form-row">
@@ -116,7 +116,7 @@
         <label class="field-label" for="editor">본문 <span class="optional">선택</span></label>
         <div class="editor-toolbar" role="toolbar" aria-label="본문 서식">
           <label class="editor-control"><span class="sr-only">글씨체</span><select id="fontFamily" aria-label="글씨체"><option value="Noto Sans KR">기본 글씨체</option><option value="Georgia">명조체</option><option value="Arial">Arial</option></select></label>
-          <label class="editor-control"><span class="sr-only">글씨 크기</span><select id="fontSize" aria-label="글씨 크기"><option value="14">작게</option><option value="16" selected>보통</option><option value="20">큼</option><option value="24">제목</option><option value="32">큰 제목</option></select></label>
+          <label class="editor-control editor-size-control"><span class="sr-only">글씨 크기</span><input id="fontSize" type="number" min="12" max="48" step="1" value="16" inputmode="numeric" aria-label="글씨 크기 (12–48px)" title="글씨 크기를 12~48px 사이 숫자로 입력"><span aria-hidden="true">px</span></label>
           <button type="button" class="editor-button" data-command="bold" aria-label="굵게"><strong>B</strong></button>
           <button type="button" class="editor-button" data-command="italic" aria-label="기울임"><em>I</em></button>
           <button type="button" class="editor-button" data-command="underline" aria-label="밑줄"><u>U</u></button>
@@ -141,8 +141,10 @@
           <input class="media-picker-input" id="videoInput" type="file" accept="video/mp4,video/webm,video/quicktime" multiple aria-label="동영상 파일 선택">
         </div>
         <div id="previewList" class="preview-list" aria-live="polite"></div>
+        <p id="existingMediaNotice" class="existing-media-notice" hidden></p>
         <div id="formMessage" class="form-message" role="status" hidden></div>
-        <button class="submit-button" id="submitButton" type="submit"><span>게시물 등록하기</span><span aria-hidden="true">↗</span></button>
+        <button class="submit-button" id="submitButton" type="submit"><span id="submitButtonLabel">게시물 등록하기</span><span aria-hidden="true">↗</span></button>
+        <button id="cancelEditButton" class="cancel-edit-button" type="button" hidden>수정 취소</button>
         <p class="form-footnote">제목, 작업 이야기, 첨부 파일이 하나의 게시물로 저장됩니다.</p>
       </form>
     </section>

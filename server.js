@@ -295,6 +295,46 @@ app.post('/api/posts', requireAdmin, upload.array('media', 10), async (req, res)
   }
 });
 
+app.put('/api/posts/:id', requireAdmin, upload.array('media', 10), async (req, res) => {
+  const uploadedIds = [];
+  if (!/^[a-f\d]{24}$/i.test(req.params.id)) {
+    await cleanupTempFiles(req.files);
+    return res.status(400).json({ success: false, message: '올바르지 않은 게시물 ID입니다.' });
+  }
+  try {
+    const post = await PortfolioPost.findOne({ _id: req.params.id, deletedAt: null });
+    if (!post) {
+      await cleanupTempFiles(req.files);
+      return res.status(404).json({ success: false, message: '수정할 게시물을 찾을 수 없습니다.' });
+    }
+    const title = (req.body.title || '').trim();
+    const bodyHtml = sanitizeRichText(req.body.bodyHtml || '');
+    const description = plainTextFromHtml(bodyHtml).trim();
+    const category = (req.body.category || '기타').trim();
+    if (!title || title.length > 120 || description.length > 5000 || bodyHtml.length > 30000 || category.length > 40) {
+      await cleanupTempFiles(req.files);
+      return res.status(400).json({ success: false, message: '제목을 확인하거나 입력한 내용의 길이를 줄여주세요.' });
+    }
+    if ((post.media || []).length + (req.files || []).length > 10) {
+      await cleanupTempFiles(req.files);
+      return res.status(400).json({ success: false, message: '한 게시물에는 최대 10개까지 첨부할 수 있어요.' });
+    }
+    const media = [...(post.media || [])];
+    for (const file of req.files || []) media.push(await storeMediaFile(file, uploadedIds));
+    post.title = title;
+    post.description = description;
+    post.bodyHtml = bodyHtml;
+    post.category = category;
+    post.media = media;
+    await post.save();
+    await cleanupTempFiles(req.files);
+    res.json({ success: true, post: serializePost(post) });
+  } catch (err) {
+    await Promise.all([cleanupTempFiles(req.files), cleanupGridFsFiles(uploadedIds)]);
+    res.status(500).json({ success: false, message: '게시물을 수정하지 못했습니다.' });
+  }
+});
+
 function serializePost(post) {
   const value = post.toObject ? post.toObject() : post;
   return {
