@@ -13,6 +13,10 @@ const loginMessage = document.querySelector('#loginMessage');
 const dialog = document.querySelector('#mediaDialog');
 const dialogMedia = document.querySelector('#dialogMedia');
 const dialogCaption = document.querySelector('#dialogCaption');
+const editor = document.querySelector('#editor');
+const detailView = document.querySelector('#postDetail');
+const trashSection = document.querySelector('#trashSection');
+const trashList = document.querySelector('#trashList');
 
 const MAX_FILES = 10;
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
@@ -35,7 +39,9 @@ async function refreshAdminStatus() {
     isAdmin = status.authenticated;
     loginPanel.hidden = status.authenticated;
     postForm.hidden = !status.authenticated;
+    document.querySelector('#trashNav').hidden = !status.authenticated;
     renderPosts();
+    syncPageFromHash();
     if (!status.configured) {
       document.querySelector('#loginDescription').textContent = '서버 환경 변수 PORTFOLIO_ADMIN_PASSWORD와 ADMIN_SESSION_SECRET 설정이 필요합니다.';
       loginForm.hidden = true;
@@ -85,6 +91,7 @@ async function loadPosts() {
     posts = data.posts || [];
     document.querySelector('#loadError').hidden = true;
     renderPosts();
+    syncPageFromHash();
   } catch (error) {
     document.querySelector('#loadError').textContent = '게시물을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.';
     document.querySelector('#loadError').hidden = false;
@@ -96,7 +103,7 @@ function renderPosts() {
   const query = document.querySelector('#searchInput').value.trim().toLocaleLowerCase();
   const visiblePosts = posts.filter(post => {
     const categoryMatch = activeFilter === '전체' || post.category === activeFilter;
-    const searchMatch = !query || `${post.title} ${post.description} ${post.category}`.toLocaleLowerCase().includes(query);
+    const searchMatch = !query || `${post.title} ${post.description} ${plainText(post.bodyHtml)} ${post.category}`.toLocaleLowerCase().includes(query);
     return categoryMatch && searchMatch;
   });
   postGrid.replaceChildren();
@@ -178,7 +185,10 @@ function createPostCard(post, index) {
   date.textContent = formatDate(post.createdAt);
   meta.append(category, date);
   const title = document.createElement('h3');
-  title.textContent = post.title;
+  const titleLink = document.createElement('a');
+  titleLink.href = `#post/${post._id}`;
+  titleLink.textContent = post.title;
+  title.append(titleLink);
   info.append(meta, title);
   if (post.description) {
     const description = document.createElement('p');
@@ -196,7 +206,7 @@ function createPostCard(post, index) {
     const deleteButton = document.createElement('button');
     deleteButton.type = 'button';
     deleteButton.className = 'delete-post-button';
-    deleteButton.textContent = '게시물 삭제';
+    deleteButton.textContent = '휴지통으로 이동';
     deleteButton.setAttribute('aria-label', `${post.title} 게시물 삭제`);
     deleteButton.addEventListener('click', () => deletePost(post, deleteButton));
     info.append(deleteButton);
@@ -206,7 +216,7 @@ function createPostCard(post, index) {
 }
 
 async function deletePost(post, button) {
-  const confirmed = window.confirm(`“${post.title}” 게시물과 첨부된 사진·동영상을 삭제할까요? 삭제 후에는 복구할 수 없습니다.`);
+  const confirmed = window.confirm(`“${post.title}” 게시물을 휴지통으로 이동할까요? 30일 안에 복원할 수 있습니다.`);
   if (!confirmed) return;
   button.disabled = true;
   button.textContent = '삭제 중…';
@@ -218,7 +228,7 @@ async function deletePost(post, button) {
     if (!response.ok || !data.success) throw new Error(data.message || '게시물을 삭제하지 못했습니다.');
     posts = posts.filter(item => item._id !== post._id);
     renderPosts();
-    archiveMessage.textContent = '게시물과 첨부 미디어를 삭제했습니다.';
+    archiveMessage.textContent = '게시물을 휴지통으로 이동했습니다. 30일 안에 복원할 수 있어요.';
     archiveMessage.classList.remove('notice-error');
     archiveMessage.hidden = false;
   } catch (error) {
@@ -226,7 +236,7 @@ async function deletePost(post, button) {
     archiveMessage.classList.add('notice-error');
     archiveMessage.hidden = false;
     button.disabled = false;
-    button.textContent = '게시물 삭제';
+    button.textContent = '휴지통으로 이동';
   }
 }
 
@@ -290,6 +300,173 @@ document.querySelectorAll('.filter-chip').forEach(button => {
   });
 });
 document.querySelector('#searchInput').addEventListener('input', renderPosts);
+
+let savedEditorRange = null;
+document.addEventListener('selectionchange', () => {
+  const selection = window.getSelection();
+  if (selection?.rangeCount && editor.contains(selection.anchorNode)) savedEditorRange = selection.getRangeAt(0).cloneRange();
+});
+function restoreEditorSelection() {
+  if (!savedEditorRange || !editor.contains(savedEditorRange.commonAncestorContainer)) return;
+  editor.focus();
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(savedEditorRange);
+}
+function styleSelection(property, value) {
+  restoreEditorSelection();
+  if (!savedEditorRange || savedEditorRange.collapsed) return;
+  const span = document.createElement('span');
+  span.style[property] = value;
+  span.append(savedEditorRange.extractContents());
+  savedEditorRange.insertNode(span);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  const range = document.createRange();
+  range.selectNodeContents(span);
+  selection.addRange(range);
+  savedEditorRange = range.cloneRange();
+}
+const editorToolbar = document.querySelector('.editor-toolbar');
+editorToolbar.addEventListener('mousedown', event => {
+  if (event.target.closest('button')) event.preventDefault();
+});
+editorToolbar.querySelectorAll('[data-command]').forEach(button => button.addEventListener('click', () => {
+  restoreEditorSelection();
+  document.execCommand(button.dataset.command, false);
+  editor.focus();
+}));
+editorToolbar.querySelectorAll('[data-align]').forEach(button => button.addEventListener('click', () => {
+  restoreEditorSelection();
+  document.execCommand(`justify${button.dataset.align[0].toUpperCase()}${button.dataset.align.slice(1)}`, false);
+  editor.focus();
+}));
+document.querySelector('[data-block="h2"]').addEventListener('click', () => {
+  restoreEditorSelection();
+  document.execCommand('formatBlock', false, 'h2');
+  editor.focus();
+});
+document.querySelector('#fontFamily').addEventListener('change', event => styleSelection('fontFamily', event.target.value));
+document.querySelector('#fontSize').addEventListener('change', event => styleSelection('fontSize', `${event.target.value}px`));
+document.querySelector('#fontColor').addEventListener('input', event => styleSelection('color', event.target.value));
+
+window.addEventListener('hashchange', syncPageFromHash);
+syncPageFromHash();
+
+function syncPageFromHash() {
+  const hash = decodeURIComponent(location.hash.slice(1));
+  const isDetail = hash.startsWith('post/');
+  const isTrash = hash === 'trash';
+  document.querySelectorAll('main > section:not(.page-view)').forEach(section => { section.hidden = isDetail || isTrash; });
+  detailView.hidden = !isDetail;
+  trashSection.hidden = !isTrash;
+  if (isDetail) loadPostDetail(hash.slice('post/'.length));
+  if (isTrash) loadTrash();
+}
+
+async function loadPostDetail(id) {
+  detailView.replaceChildren();
+  const cached = posts.find(post => post._id === id);
+  try {
+    let post = cached;
+    if (!post) {
+      const response = await fetch(`/api/posts/${encodeURIComponent(id)}`);
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.message || '게시물을 찾을 수 없습니다.');
+      post = data.post;
+    }
+    if (location.hash !== `#post/${id}`) return;
+    const back = document.createElement('a');
+    back.href = '#work'; back.className = 'detail-back'; back.textContent = '← 작업 아카이브';
+    const meta = document.createElement('div'); meta.className = 'post-meta detail-meta';
+    const category = document.createElement('span'); category.className = 'category-tag'; category.textContent = post.category || '기타';
+    const date = document.createElement('time'); date.dateTime = post.createdAt; date.textContent = formatDate(post.createdAt);
+    meta.append(category, date);
+    const title = document.createElement('h1'); title.className = 'detail-title'; title.textContent = post.title;
+    const article = document.createElement('article'); article.className = 'blog-article';
+    if (post.bodyHtml) article.innerHTML = post.bodyHtml;
+    else if (post.description) { const paragraph = document.createElement('p'); paragraph.textContent = post.description; article.append(paragraph); }
+    const media = document.createElement('div'); media.className = 'detail-media-list';
+    (post.media || []).forEach(item => {
+      const node = item.type === 'video' ? document.createElement('video') : document.createElement('img');
+      node.src = item.url;
+      if (item.type === 'video') { node.controls = true; node.playsInline = true; }
+      else { node.alt = item.name || post.title; node.loading = 'lazy'; }
+      media.append(node);
+    });
+    detailView.append(back, meta, title, media, article);
+    if (isAdmin) {
+      const remove = document.createElement('button'); remove.className = 'delete-post-button'; remove.textContent = '휴지통으로 이동';
+      remove.addEventListener('click', async () => {
+        if (!window.confirm(`“${post.title}” 게시물을 휴지통으로 이동할까요? 30일 안에 복원할 수 있습니다.`)) return;
+        try {
+          const response = await fetch(`/api/posts/${encodeURIComponent(post._id)}`, { method: 'DELETE' });
+          const data = await response.json();
+          if (!response.ok || !data.success) throw new Error(data.message || '게시물을 이동하지 못했습니다.');
+          location.hash = 'work'; loadPosts();
+        } catch (error) { window.alert(error.message || '게시물을 이동하지 못했습니다.'); }
+      });
+      detailView.append(remove);
+    }
+  } catch (error) {
+    const message = document.createElement('p'); message.className = 'notice notice-error'; message.textContent = error.message;
+    const back = document.createElement('a'); back.href = '#work'; back.className = 'detail-back'; back.textContent = '← 작업 아카이브';
+    detailView.append(back, message);
+  }
+}
+
+async function loadTrash() {
+  trashList.replaceChildren();
+  document.querySelector('#trashEmpty').hidden = true;
+  if (!isAdmin) {
+    trashList.textContent = '휴지통은 관리자 로그인 후 확인할 수 있습니다.';
+    return;
+  }
+  try {
+    const response = await fetch('/api/trash');
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.message || '휴지통을 불러오지 못했습니다.');
+    data.posts.forEach(post => {
+      const row = document.createElement('article'); row.className = 'trash-row';
+      const info = document.createElement('div'); info.className = 'trash-row-info';
+      const title = document.createElement('strong'); title.textContent = post.title;
+      const expiration = document.createElement('span');
+      const days = Math.max(0, Math.ceil((new Date(post.expiresAt) - Date.now()) / 86400000));
+      expiration.textContent = `${formatDate(post.deletedAt)} 삭제 · ${days}일 후 영구 삭제`;
+      info.append(title, expiration);
+      const actions = document.createElement('div'); actions.className = 'trash-actions';
+      const restore = document.createElement('button'); restore.type = 'button'; restore.className = 'restore-button'; restore.textContent = '복원';
+      restore.addEventListener('click', () => restorePost(post));
+      const erase = document.createElement('button'); erase.type = 'button'; erase.className = 'purge-button'; erase.textContent = '완전히 삭제';
+      erase.addEventListener('click', () => permanentlyDeletePost(post));
+      actions.append(restore, erase); row.append(info, actions); trashList.append(row);
+    });
+    document.querySelector('#trashEmpty').hidden = data.posts.length > 0;
+  } catch (error) {
+    const message = document.querySelector('#trashMessage'); message.textContent = error.message; message.hidden = false;
+  }
+}
+
+async function restorePost(post) {
+  const response = await fetch(`/api/trash/${encodeURIComponent(post._id)}/restore`, { method: 'POST' });
+  const data = await response.json();
+  if (!response.ok || !data.success) { window.alert(data.message || '복원하지 못했습니다.'); return; }
+  document.querySelector('#trashMessage').textContent = '게시물을 복원했습니다.';
+  document.querySelector('#trashMessage').hidden = false;
+  await Promise.all([loadTrash(), loadPosts()]);
+}
+
+async function permanentlyDeletePost(post) {
+  if (!window.confirm(`“${post.title}” 게시물과 첨부 파일을 완전히 삭제할까요? 복구할 수 없습니다.`)) return;
+  const response = await fetch(`/api/trash/${encodeURIComponent(post._id)}`, { method: 'DELETE' });
+  const data = await response.json();
+  if (!response.ok || !data.success) { window.alert(data.message || '완전히 삭제하지 못했습니다.'); return; }
+  await loadTrash();
+}
+
+function plainText(html) {
+  const element = document.createElement('div'); element.innerHTML = html || ''; return element.textContent || '';
+}
 
 document.querySelector('#chooseImages').addEventListener('click', () => imageInput.click());
 document.querySelector('#chooseVideos').addEventListener('click', () => videoInput.click());
@@ -364,10 +541,12 @@ function formatBytes(bytes) {
 postForm.addEventListener('submit', async event => {
   event.preventDefault();
   if (!postForm.reportValidity()) return;
+  const bodyText = editor.innerText.trim();
+  if (bodyText.length > 5000) return showFormMessage('본문은 5,000자까지 작성할 수 있어요.', true);
   const payload = new FormData();
   payload.set('title', document.querySelector('#titleInput').value.trim());
   payload.set('category', document.querySelector('#categoryInput').value);
-  payload.set('description', document.querySelector('#descriptionInput').value.trim());
+  payload.set('bodyHtml', editor.innerHTML);
   selectedFiles.forEach(file => payload.append('media', file));
   submitButton.disabled = true;
   submitButton.querySelector('span:first-child').textContent = '게시물을 저장하고 있어요…';
@@ -378,6 +557,7 @@ postForm.addEventListener('submit', async event => {
     if (!response.ok || !data.success) throw new Error(data.message || '게시물을 저장하지 못했습니다.');
     posts.unshift(data.post);
     postForm.reset();
+    editor.innerHTML = '';
     selectedFiles = [];
     renderPreviews();
     activeFilter = '전체';

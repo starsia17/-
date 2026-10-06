@@ -10,13 +10,17 @@ const MediaSchema = new mongoose.Schema({
 const PortfolioPostSchema = new mongoose.Schema({
   title: { type: String, required: true, trim: true, maxlength: 120 },
   description: { type: String, default: '', trim: true, maxlength: 5000 },
+  bodyHtml: { type: String, default: '', maxlength: 30000 },
   category: { type: String, default: '기타', trim: true, maxlength: 40 },
   media: { type: [MediaSchema], default: [] },
-  createdAt: { type: Date, default: Date.now }
+  createdAt: { type: Date, default: Date.now },
+  deletedAt: { type: Date, default: null },
+  expiresAt: { type: Date, default: null }
 });
 
 PortfolioPostSchema.index({ createdAt: -1, _id: -1 });
 PortfolioPostSchema.index({ category: 1, createdAt: -1 });
+PortfolioPostSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0, partialFilterExpression: { expiresAt: { $type: 'date' } } });
 
 module.exports = mongoose.model('PortfolioPost', PortfolioPostSchema, 'portfolioPosts');
 

@@ -19,7 +19,9 @@ const ADMIN_SESSION_SECRET = process.env.ADMIN_SESSION_SECRET || '';
 const loginAttempts = new Map();
 const TEMP_UPLOAD_DIR = path.join(os.tmpdir(), 'creative-work-archive-uploads');
 const GRIDFS_BUCKET_NAME = 'portfolioMedia';
+const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 let mediaBucket;
+let lastTrashPurgeAt = 0;
 const allowedMediaTypes = new Set([
   'image/jpeg', 'image/png', 'image/gif', 'image/webp',
   'video/mp4', 'video/webm', 'video/quicktime'
@@ -29,6 +31,12 @@ fs.mkdirSync(TEMP_UPLOAD_DIR, { recursive: true });
 app.set('trust proxy', true);
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/api', async (req, res, next) => {
+  if (Date.now() - lastTrashPurgeAt < 60 * 1000) return next();
+  lastTrashPurgeAt = Date.now();
+  try { await purgeExpiredTrash(); } catch (err) { console.error('휴지통 정리 실패:', err.message); }
+  next();
+});
 
 app.get('/api/health', (req, res) => {
   const connected = mongoose.connection.readyState === 1;
@@ -111,8 +119,28 @@ app.post('/api/admin/logout', (req, res) => {
 
 app.get('/api/posts', async (req, res) => {
   try {
-    const posts = await PortfolioPost.find().sort({ createdAt: -1 }).limit(100).lean();
+    const posts = await PortfolioPost.find({ deletedAt: null }).sort({ createdAt: -1 }).limit(100).lean();
     res.json({ success: true, posts: posts.map(serializePost) });
+  } catch (err) {
+    res.status(500).json({ success: false, message: '게시물을 불러오지 못했습니다.' });
+  }
+});
+
+app.get('/api/trash', requireAdmin, async (req, res) => {
+  try {
+    const posts = await PortfolioPost.find({ deletedAt: { $ne: null } }).sort({ deletedAt: -1 }).limit(100).lean();
+    res.json({ success: true, posts: posts.map(serializePost) });
+  } catch (err) {
+    res.status(500).json({ success: false, message: '휴지통을 불러오지 못했습니다.' });
+  }
+});
+
+app.get('/api/posts/:id', async (req, res) => {
+  if (!/^[a-f\d]{24}$/i.test(req.params.id)) return res.status(400).json({ success: false, message: '올바르지 않은 게시물 ID입니다.' });
+  try {
+    const post = await PortfolioPost.findOne({ _id: req.params.id, deletedAt: null }).lean();
+    if (!post) return res.status(404).json({ success: false, message: '게시물을 찾을 수 없습니다.' });
+    res.json({ success: true, post: serializePost(post) });
   } catch (err) {
     res.status(500).json({ success: false, message: '게시물을 불러오지 못했습니다.' });
   }
@@ -125,11 +153,41 @@ app.delete('/api/posts/:id', requireAdmin, async (req, res) => {
   try {
     const post = await PortfolioPost.findById(req.params.id);
     if (!post) return res.status(404).json({ success: false, message: '게시물을 찾을 수 없습니다.' });
-    await post.deleteOne();
+    if (post.deletedAt) return res.status(409).json({ success: false, message: '이미 휴지통에 있는 게시물입니다.' });
+    const deletedAt = new Date();
+    post.deletedAt = deletedAt;
+    post.expiresAt = new Date(deletedAt.getTime() + 30 * 24 * 60 * 60 * 1000);
+    await post.save();
+    res.json({ success: true, post: serializePost(post) });
+  } catch (err) {
+    res.status(500).json({ success: false, message: '게시물을 삭제하지 못했습니다.' });
+  }
+});
+
+app.post('/api/trash/:id/restore', requireAdmin, async (req, res) => {
+  if (!/^[a-f\d]{24}$/i.test(req.params.id)) return res.status(400).json({ success: false, message: '올바르지 않은 게시물 ID입니다.' });
+  try {
+    const post = await PortfolioPost.findOneAndUpdate(
+      { _id: req.params.id, deletedAt: { $ne: null } },
+      { $set: { deletedAt: null, expiresAt: null } },
+      { new: true }
+    );
+    if (!post) return res.status(404).json({ success: false, message: '휴지통에서 게시물을 찾을 수 없습니다.' });
+    res.json({ success: true, post: serializePost(post) });
+  } catch (err) {
+    res.status(500).json({ success: false, message: '게시물을 복원하지 못했습니다.' });
+  }
+});
+
+app.delete('/api/trash/:id', requireAdmin, async (req, res) => {
+  if (!/^[a-f\d]{24}$/i.test(req.params.id)) return res.status(400).json({ success: false, message: '올바르지 않은 게시물 ID입니다.' });
+  try {
+    const post = await PortfolioPost.findOneAndDelete({ _id: req.params.id, deletedAt: { $ne: null } });
+    if (!post) return res.status(404).json({ success: false, message: '휴지통에서 게시물을 찾을 수 없습니다.' });
     await cleanupGridFsFiles((post.media || []).map(item => item.fileId));
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ success: false, message: '게시물을 삭제하지 못했습니다.' });
+    res.status(500).json({ success: false, message: '게시물을 완전히 삭제하지 못했습니다.' });
   }
 });
 
@@ -192,13 +250,14 @@ app.post('/api/posts', requireAdmin, upload.array('media', 10), async (req, res)
   const uploadedIds = [];
   try {
     const title = (req.body.title || '').trim();
-    const description = (req.body.description || '').trim();
+    const bodyHtml = sanitizeRichText(req.body.bodyHtml || '');
+    const description = plainTextFromHtml(bodyHtml).trim();
     const category = (req.body.category || '기타').trim();
     if (!title) {
       await cleanupTempFiles(req.files);
       return res.status(400).json({ success: false, message: '작업 제목을 입력해주세요.' });
     }
-    if (title.length > 120 || description.length > 5000 || category.length > 40) {
+    if (title.length > 120 || description.length > 5000 || bodyHtml.length > 30000 || category.length > 40) {
       await cleanupTempFiles(req.files);
       return res.status(400).json({ success: false, message: '입력한 내용이 허용 길이를 초과했습니다.' });
     }
@@ -208,7 +267,7 @@ app.post('/api/posts', requireAdmin, upload.array('media', 10), async (req, res)
       const stored = await storeMediaFile(file, uploadedIds);
       media.push(stored);
     }
-    const post = await PortfolioPost.create({ title, description, category, media });
+    const post = await PortfolioPost.create({ title, description, bodyHtml, category, media });
     await cleanupTempFiles(req.files);
     res.status(201).json({ success: true, post: serializePost(post) });
   } catch (err) {
@@ -269,6 +328,78 @@ async function cleanupGridFsFiles(ids = []) {
   await Promise.all(ids.map(id => mediaBucket.delete(id).catch(() => {})));
 }
 
+async function purgeExpiredTrash() {
+  if (!mediaBucket) return;
+  const now = new Date();
+  const expired = await PortfolioPost.find({ deletedAt: { $ne: null }, expiresAt: { $lte: now } }).select('_id media').lean();
+  if (!expired.length) return;
+  await cleanupGridFsFiles(expired.flatMap(post => (post.media || []).map(item => item.fileId)));
+  await PortfolioPost.deleteMany({ _id: { $in: expired.map(post => post._id) }, deletedAt: { $ne: null }, expiresAt: { $lte: now } });
+}
+
+async function cleanupExpiredMediaOrphans() {
+  if (!mediaBucket) return;
+  const referencedIds = await PortfolioPost.distinct('media.fileId');
+  const cutoff = new Date(Date.now() - TRASH_RETENTION_MS);
+  const orphaned = await mediaBucket.find({ uploadDate: { $lt: cutoff }, _id: { $nin: referencedIds } }).project({ _id: 1 }).toArray();
+  await cleanupGridFsFiles(orphaned.map(file => file._id));
+}
+
+const richTextTags = new Set(['p', 'div', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'ul', 'ol', 'li', 'blockquote', 'h1', 'h2', 'h3', 'span']);
+
+function sanitizeRichText(input) {
+  const source = String(input).slice(0, 60000)
+    .replace(/<(script|style|iframe|object|svg|math|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '');
+  let output = '';
+  const tokens = source.match(/<\/?[a-z][^>]*>|[^<]+|</gi) || [];
+  for (const token of tokens) {
+    const match = /^<\s*(\/?)\s*([a-z][\w-]*)\b([^>]*)>/i.exec(token);
+    if (!match) { output += escapeHtml(decodeBasicEntities(token)); continue; }
+    const closing = Boolean(match[1]);
+    const tag = match[2].toLowerCase();
+    if (!richTextTags.has(tag)) continue;
+    if (closing) { if (tag !== 'br') output += `</${tag}>`; continue; }
+    const styleMatch = /\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(match[3]);
+    const style = styleMatch ? sanitizeEditorStyle(styleMatch[1] ?? styleMatch[2]) : '';
+    output += `<${tag}${style ? ` style="${style}"` : ''}${tag === 'br' ? '>' : '>'}`;
+  }
+  return output;
+}
+
+function sanitizeEditorStyle(raw) {
+  const safe = [];
+  for (const part of raw.split(';')) {
+    const [property, ...valueParts] = part.split(':');
+    const key = (property || '').trim().toLowerCase();
+    const value = valueParts.join(':').trim();
+    if (key === 'text-align' && /^(left|right|center|justify)$/i.test(value)) safe.push(`text-align:${value.toLowerCase()}`);
+    if (key === 'color' && /^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i.test(value)) safe.push(`color:${value}`);
+    if (key === 'font-size') {
+      const size = /^(\d{1,2})px$/i.exec(value);
+      if (size) safe.push(`font-size:${Math.min(48, Math.max(12, Number(size[1])))}px`);
+    }
+    if (key === 'font-family') {
+      const family = value.replace(/["']/g, '').trim();
+      const allowed = ['Noto Sans KR', 'Georgia', 'Arial', 'serif', 'sans-serif'];
+      if (allowed.includes(family)) safe.push(`font-family:${family.includes(' ') ? `"${family}"` : family}`);
+    }
+  }
+  return safe.join(';');
+}
+
+function escapeHtml(value) {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function decodeBasicEntities(value) {
+  return value.replace(/&(?:amp|lt|gt|quot|apos|nbsp);/gi, entity => ({ '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'", '&nbsp;': '\u00a0' }[entity.toLowerCase()]));
+}
+
+function plainTextFromHtml(html) {
+  return decodeBasicEntities(html.replace(/<br\s*\/?\s*>|<\/(?:p|div|li|h[1-3]|blockquote)>/gi, '\n').replace(/<[^>]*>/g, ''));
+}
+
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
   const status = err instanceof multer.MulterError ? 400 : 500;
@@ -288,6 +419,12 @@ mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 10000 })
     await PortfolioPost.createIndexes();
     console.log('MongoDB 연결 성공');
     mediaBucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, { bucketName: GRIDFS_BUCKET_NAME });
+    await purgeExpiredTrash();
+    await cleanupExpiredMediaOrphans();
+    setInterval(async () => {
+      try { await purgeExpiredTrash(); await cleanupExpiredMediaOrphans(); }
+      catch (err) { console.error('휴지통 정리 실패:', err.message); }
+    }, 60 * 60 * 1000).unref();
     server.listen(PORT, () => console.log(`서버 실행 중: http://localhost:${PORT}`));
   })
   .catch(err => {

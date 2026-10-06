@@ -18,6 +18,7 @@
     <nav class="top-nav" aria-label="주요 메뉴">
       <a href="#work">작업물</a>
       <a href="#about">소개</a>
+      <a id="trashNav" href="#trash" hidden>휴지통</a>
     </nav>
     <a class="nav-cta" href="#write">새 작업 올리기 <span aria-hidden="true">↗</span></a>
   </header>
@@ -69,6 +70,15 @@
       <p id="loadError" class="notice" role="status" hidden></p>
     </section>
 
+    <section id="postDetail" class="post-detail page-view" hidden aria-live="polite"></section>
+    <section id="trashSection" class="trash-section page-view" hidden>
+      <div class="section-heading"><div><p class="eyebrow">RECENTLY DELETED</p><h2>휴지통<span>.</span></h2></div><div class="work-count">30일 뒤 자동 삭제</div></div>
+      <p class="trash-intro">삭제한 게시물은 30일 동안 보관됩니다. 기간 안에는 복원할 수 있어요.</p>
+      <p id="trashMessage" class="notice" role="status" hidden></p>
+      <div id="trashList" class="trash-list"></div>
+      <div id="trashEmpty" class="empty-state" hidden><span class="empty-icon">♧</span><h3>휴지통이 비어 있어요</h3><p>삭제한 게시물이 여기에 보관됩니다.</p></div>
+    </section>
+
     <section class="write-section" id="write">
       <div class="write-intro"><p class="eyebrow">ADD TO THE ARCHIVE · 02</p><h2>새로운 작업을<br><span>기록해 볼까요?</span></h2><p>사진이나 동영상을 첨부하고<br>작업에 대한 이야기를 함께 남겨보세요.</p><div class="write-note">✳ 한 게시물에 최대 10개의 미디어 파일을 첨부할 수 있어요.</div></div>
       <section id="loginPanel" class="login-panel" aria-labelledby="loginTitle" hidden>
@@ -91,8 +101,22 @@
           <label class="field-group"><span class="field-label">분류</span><select id="categoryInput" name="category"><option>디자인</option><option>사진</option><option>영상</option><option>개발</option><option selected>기타</option></select></label>
           <span class="field-hint">나중에 분류별로 모아볼 수 있어요.</span>
         </div>
-        <label class="field-label" for="descriptionInput">작업 이야기 <span class="optional">선택</span></label>
-        <textarea id="descriptionInput" name="description" rows="5" maxlength="5000" placeholder="무엇을 만들었나요? 아이디어와 과정, 사용한 도구 등을 자유롭게 적어주세요."></textarea>
+        <label class="field-label" for="editor">본문 <span class="optional">선택</span></label>
+        <div class="editor-toolbar" role="toolbar" aria-label="본문 서식">
+          <label class="editor-control"><span class="sr-only">글씨체</span><select id="fontFamily" aria-label="글씨체"><option value="Noto Sans KR">기본 글씨체</option><option value="Georgia">명조체</option><option value="Arial">Arial</option></select></label>
+          <label class="editor-control"><span class="sr-only">글씨 크기</span><select id="fontSize" aria-label="글씨 크기"><option value="14">작게</option><option value="16" selected>보통</option><option value="20">큼</option><option value="24">제목</option><option value="32">큰 제목</option></select></label>
+          <button type="button" class="editor-button" data-command="bold" aria-label="굵게"><strong>B</strong></button>
+          <button type="button" class="editor-button" data-command="italic" aria-label="기울임"><em>I</em></button>
+          <button type="button" class="editor-button" data-command="underline" aria-label="밑줄"><u>U</u></button>
+          <label class="editor-color" title="글자 색"><span>A</span><input id="fontColor" type="color" value="#17211a" aria-label="글자 색"></label>
+          <span class="editor-separator" aria-hidden="true"></span>
+          <button type="button" class="editor-button" data-align="left" aria-label="왼쪽 정렬">≡</button>
+          <button type="button" class="editor-button" data-align="center" aria-label="가운데 정렬">☰</button>
+          <button type="button" class="editor-button" data-align="right" aria-label="오른쪽 정렬">≡</button>
+          <button type="button" class="editor-button" data-block="h2" aria-label="소제목">H</button>
+          <button type="button" class="editor-button" data-command="insertUnorderedList" aria-label="글머리 기호">• 목록</button>
+        </div>
+        <div id="editor" class="rich-editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="게시물 본문" data-placeholder="무엇을 만들었나요? 아이디어와 과정, 사용한 도구 등을 자유롭게 적어주세요."></div>
         <div class="upload-label-row"><span class="field-label">사진 · 동영상 <span class="optional">선택</span></span><span class="field-hint">이미지 / MP4 / WebM / MOV · 파일당 최대 50MB</span></div>
         <div class="drop-zone" id="dropZone">
           <span class="upload-icon">↑</span><strong>파일을 끌어 놓거나 종류를 골라 추가하세요</strong>
