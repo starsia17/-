@@ -2,7 +2,8 @@ const postGrid = document.querySelector('#postGrid');
 const emptyState = document.querySelector('#emptyState');
 const postCount = document.querySelector('#postCount');
 const postForm = document.querySelector('#postForm');
-const mediaInput = document.querySelector('#mediaInput');
+const imageInput = document.querySelector('#imageInput');
+const videoInput = document.querySelector('#videoInput');
 const previewList = document.querySelector('#previewList');
 const formMessage = document.querySelector('#formMessage');
 const submitButton = document.querySelector('#submitButton');
@@ -290,9 +291,13 @@ document.querySelectorAll('.filter-chip').forEach(button => {
 });
 document.querySelector('#searchInput').addEventListener('input', renderPosts);
 
-mediaInput.addEventListener('change', () => {
-  addFiles(mediaInput.files);
-  mediaInput.value = '';
+document.querySelector('#chooseImages').addEventListener('click', () => imageInput.click());
+document.querySelector('#chooseVideos').addEventListener('click', () => videoInput.click());
+[[imageInput, 'image/'], [videoInput, 'video/']].forEach(([input, expectedType]) => {
+  input.addEventListener('change', () => {
+    addFiles(input.files, expectedType);
+    input.value = '';
+  });
 });
 const dropZone = document.querySelector('#dropZone');
 dropZone.addEventListener('dragover', event => { event.preventDefault(); dropZone.classList.add('drag-over'); });
@@ -303,10 +308,10 @@ dropZone.addEventListener('drop', event => {
   addFiles(event.dataTransfer.files);
 });
 
-function addFiles(fileList) {
+function addFiles(fileList, expectedType = '') {
   const incoming = Array.from(fileList || []);
   const current = new Set(selectedFiles.map(file => `${file.name}:${file.size}:${file.lastModified}`));
-  const invalid = incoming.find(file => !ALLOWED_TYPES.has(file.type));
+  const invalid = incoming.find(file => !ALLOWED_TYPES.has(file.type) || (expectedType && !file.type.startsWith(expectedType)));
   if (invalid) return showFormMessage(`${invalid.name}: 지원하지 않는 사진 또는 동영상 형식입니다.`, true);
   const oversized = incoming.find(file => file.size > MAX_FILE_SIZE);
   if (oversized) return showFormMessage(`${oversized.name}: 파일당 최대 크기는 50MB입니다.`, true);
