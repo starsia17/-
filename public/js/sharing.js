@@ -12,20 +12,28 @@
   let context = null, version = 0, busy = false, identity = null;
   function clearPreview() { previewRoot.querySelectorAll('video').forEach(video => video.pause()); previewRoot.replaceChildren(); previewRoot.hidden = true; modal.classList.remove('share-preview-open'); }
   previewButton.addEventListener('click', async () => {
-    if (!context || busy) return; const epoch = version, current = { ...context }; previewButton.disabled = true;
+    if (!context || busy || previewButton.disabled) return; const epoch = version, current = { ...context }; previewButton.disabled = true;
     try { const response = await window.portfolioAuth.fetch('/api/' + (current.type === 'post' ? 'posts' : 'portfolios') + '/' + current.id + '/preview'); const data = await response.json();
-      if (epoch !== version) return; if (!response.ok || !data.success) throw Error(data.message || '미리보기를 불러오지 못했습니다.');
-      clearPreview(); previewRoot.hidden = false; modal.classList.add('share-preview-open'); previewRoot.append(window.portfolioPresentation.render(data, window.portfolioAuth.mediaUrl));
+      if (epoch !== version) return; if (response.status === 401) window.portfolioAuth.expire(); if (!response.ok || !data.success) throw Error(data.message || '미리보기를 불러오지 못했습니다.');
+      clearPreview(); previewRoot.hidden = false; modal.classList.add('share-preview-open');
+      const frame = document.createElement('div'); frame.className = 'career-preview-frame'; frame.append(window.portfolioPresentation.render(data, window.portfolioAuth.mediaUrl));
+      if (current.type === 'portfolio') {
+        const widths = document.createElement('div'); widths.className = 'career-actions';
+        ['PC 화면', '모바일 화면'].forEach((label, index) => { const button = document.createElement('button'); button.type = 'button'; button.className = 'career-secondary'; button.textContent = label; button.setAttribute('aria-pressed', String(!index));
+          button.addEventListener('click', () => { frame.classList.toggle('career-preview-mobile', !!index); widths.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b === button))); }); widths.append(button); });
+        previewRoot.append(widths);
+      }
+      previewRoot.append(frame);
       status.textContent = '미리보기입니다. 공개 링크는 생성되지 않았습니다.';
     } catch (error) { if (epoch === version) status.textContent = error.message; }
-    finally { previewButton.disabled = false; }
+    finally { if (epoch === version) previewButton.disabled = false; }
   });
   function show(token) {
     active.hidden = !token; create.hidden = !!token; consent.parentElement.hidden = !!token;
     input.value = token ? location.origin + '/share.html#' + token : '';
     modal.querySelector('[data-native]').hidden = !navigator.share;
   }
-  function setBusy(value) { busy = value; create.disabled = value; revoke.disabled = value; consent.disabled = value; }
+  function setBusy(value) { busy = value; create.disabled = value; revoke.disabled = value; consent.disabled = value; previewButton.disabled = value; }
   async function request(method, epoch) {
     const response = await window.portfolioAuth.fetch('/api/shares/' + context.type + '/' + context.id, { method });
     const data = await response.json(); if (epoch !== version) throw Error('공유 창이 변경되었습니다.');
@@ -62,7 +70,7 @@
     try { await navigator.share({ title: '작업 포트폴리오', url: input.value }); } catch (error) { if (error.name !== 'AbortError') status.textContent = '링크 복사를 이용해주세요.'; }
   });
   modal.querySelector('[data-close]').addEventListener('click', () => modal.close());
-  modal.addEventListener('close', () => { version++; context = null; input.value = ''; clearPreview(); });
+  modal.addEventListener('close', () => { version++; context = null; input.value = ''; status.textContent = ''; show(null); setBusy(false); clearPreview(); });
   document.addEventListener('portfolio:auth', event => {
     const next = event.detail.user?.id || null; if (next === identity) return;
     identity = next; version++; if (modal.open) modal.close();

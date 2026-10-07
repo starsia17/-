@@ -4,7 +4,7 @@
   const choices = document.querySelector('#portfolioChoices'), order = document.querySelector('#portfolioOrder');
   const search = document.querySelector('#portfolioSearch'), message = document.querySelector('#portfolioStatus');
   const save = document.querySelector('#portfolioSaveButton');
-  let identity = null, epoch = 0, sequence = 0, posts = [], selected = [], editing = null, creationKey = '', saving = false;
+  let identity = null, epoch = 0, sequence = 0, posts = [], selected = [], editing = null, creationKey = '', saving = false, activeRoute = '';
   function node(tag, text, className) { const element = document.createElement(tag); if (text !== undefined) element.textContent = text; if (className) element.className = className; return element; }
   function status(text = '', error = false) { message.textContent = text; message.hidden = !text; message.classList.toggle('notice-status-error', error); }
   function stopMedia() { output.querySelectorAll('video').forEach(video => video.pause()); output.replaceChildren(); }
@@ -110,9 +110,10 @@
     const button = node('button', 'PDF 저장', 'career-secondary'); button.type = 'button';
     button.addEventListener('click', async () => {
       const root = output.querySelector('.curated-portfolio'); if (!root) return;
-      button.disabled = true; status('인쇄 화면에서 PDF로 저장을 선택하세요. 모바일에서는 시스템 인쇄·공유 메뉴를 이용하세요. 영상은 링크 또는 안내 문구로 표시됩니다.');
+      const version = epoch, request = sequence;
+      button.disabled = true; status('새 인쇄 화면에서 PDF 저장을 선택하세요. 영상은 링크 또는 안내 문구로 표시됩니다.');
       try { await window.portfolioPresentation.print(root, root.querySelector('h1')?.textContent); }
-      catch (error) { status(error.message, true); } finally { button.disabled = false; }
+      catch (error) { if (version === epoch && request === sequence) status(error.message, true); } finally { button.disabled = false; }
     }); return button;
   }
   async function moveToTrash(item, button) {
@@ -122,12 +123,17 @@
       await read('/api/portfolios/' + item.id, { method: 'DELETE' }, version);
       if (version !== epoch || request !== sequence) return;
       if (location.hash.startsWith('#portfolio/')) location.hash = 'portfolios';
-      else { await setVisible(true, 'portfolios'); status('포트폴리오를 휴지통으로 이동했습니다. 30일 안에 복원할 수 있습니다.'); }
+      else { await setVisible(true, 'portfolios', true); status('포트폴리오를 휴지통으로 이동했습니다. 30일 안에 복원할 수 있습니다.'); }
     } catch (error) { if (version === epoch && request === sequence) status(error.message, true); }
     finally { button.disabled = false; }
   }
-  async function setVisible(visible, route = 'portfolios') {
+  async function setVisible(visible, route = 'portfolios', force = false) {
+    // Background archive/session loading can repeat the same route. Do not
+    // reinitialize a visible form and erase its unsaved work or creation key.
+    if (visible && window.portfolioAuth.user && !page.hidden && activeRoute === route && !force) return;
+    activeRoute = visible && window.portfolioAuth.user ? route : '';
     page.hidden = !visible || !window.portfolioAuth.user; const request = ++sequence, version = epoch;
+    window.portfolioCareer?.leaveBuilder();
     stopMedia(); list.replaceChildren(); form.hidden = true; status('');
     if (page.hidden) return;
     status('불러오는 중…'); saving = false; editing = null;
@@ -172,12 +178,12 @@
         renderPortfolio(data.portfolio); output.prepend(actions);
       } else throw Error('올바르지 않은 포트폴리오 주소입니다.');
       status(editing?.unavailableCount ? '휴지통에 있거나 삭제된 게시글은 선택 목록에서 제외했습니다. 저장하면 현재 선택한 게시글로 구성이 변경됩니다.' : '');
-    } catch (error) { if (request === sequence && version === epoch) status(error.message, true); }
+    } catch (error) { if (request === sequence && version === epoch) { activeRoute = ''; status(error.message, true); } }
   }
   window.portfolioBuilder = { setVisible };
   function syncUser(user) {
     const next = user ? user.id : null; if (next === identity) return;
-    identity = next; epoch++; sequence++; posts = []; selected = []; editing = null; saving = false;
+    identity = next; epoch++; sequence++; posts = []; selected = []; editing = null; saving = false; activeRoute = '';
     form.reset(); choices.replaceChildren(); order.replaceChildren(); list.replaceChildren(); stopMedia(); status('');
     if (!user) { page.hidden = true; return; }
     const hash = location.hash.slice(1); if (hash === 'portfolios' || hash === 'portfolios/new' || hash.startsWith('portfolio/')) setVisible(true, hash);

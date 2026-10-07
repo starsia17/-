@@ -6,23 +6,30 @@ module.exports = function mount(app, Collection, Post, requireUser, serializePos
     resume: item.resume || null, projectNotes: (item.projectNotes || []).map(note => ({ postId: String(note.postId), bodyHtml: note.bodyHtml })),
     layout: item.layout, postIds: item.postIds.map(String), revision: item.revision || 0,
     createdAt: item.createdAt, updatedAt: item.updatedAt, deletedAt: item.deletedAt || null, expiresAt: item.expiresAt || null });
-  function input(body) {
+  function input(body, existing = {}) {
     if (!body || typeof body.title !== 'string' || !body.title.trim() || body.title.trim().length > 100 ||
       typeof body.introduction !== 'string' || body.introduction.length > 2000 ||
       !['auto', 'gallery', 'story'].includes(body.layout) || !Array.isArray(body.postIds) ||
       body.postIds.length < 1 || body.postIds.length > 200 || body.postIds.some(id => !validId(id)) ||
       new Set(body.postIds.map(id => id.toLowerCase())).size !== body.postIds.length) return null;
     try {
-      const introductionHtml = rich(body.introductionHtml || '', sanitize, plain);
-      const targetCompany = body.targetCompany || '', targetRole = body.targetRole || '';
+      // Old clients do not send career fields. Preserve them during PATCH;
+      // an explicit empty string, null resume or empty notes still clears them.
+      const value = (key, fallback) => Object.hasOwn(body, key) ? body[key] : existing[key] ?? fallback;
+      const introductionHtml = rich(value('introductionHtml', ''), sanitize, plain);
+      const targetCompany = value('targetCompany', ''), targetRole = value('targetRole', '');
       if (typeof targetCompany !== 'string' || targetCompany.length > 100 || typeof targetRole !== 'string' || targetRole.length > 120) return null;
-      const notes = body.projectNotes || [];
+      const selected = new Set(body.postIds.map(id => id.toLowerCase()));
+      const notes = Object.hasOwn(body, 'projectNotes') ? body.projectNotes :
+        (existing.projectNotes || []).filter(note => selected.has(String(note.postId).toLowerCase()))
+          .map(note => ({ postId: String(note.postId), bodyHtml: note.bodyHtml || '' }));
       if (!Array.isArray(notes) || notes.length > 200 || notes.some(note => !note || !validId(note.postId) || !body.postIds.some(id => id.toLowerCase() === note.postId.toLowerCase())) || new Set(notes.map(note => note.postId.toLowerCase())).size !== notes.length) return null;
       const projectNotes = notes.map(note => ({ postId: note.postId.toLowerCase(), bodyHtml: rich(note.bodyHtml, sanitize, plain) }));
-      const profile = body.resume == null ? null : resume(body.resume, sanitize, plain);
+      const profileValue = value('resume', null);
+      const profile = profileValue == null ? null : resume(profileValue, sanitize, plain);
       if (introductionHtml.length + projectNotes.reduce((sum, note) => sum + note.bodyHtml.length, 0) + (profile?.bodyHtml.length || 0) > 600000) return null;
       return { title: body.title.trim(), introduction: body.introduction.trim(), introductionHtml, targetCompany: targetCompany.trim(), targetRole: targetRole.trim(),
-        resume: profile, projectNotes, layout: body.layout, postIds: body.postIds };
+        resume: profile, projectNotes, layout: body.layout, postIds: [...selected] };
     } catch { return null; }
   }
   async function available(ownerId, ids) {
@@ -81,11 +88,13 @@ module.exports = function mount(app, Collection, Post, requireUser, serializePos
     } catch (error) { next(error); }
   });
   app.patch('/api/portfolios/:id', requireUser, async (req, res, next) => {
-    const values = input(req.body), revision = req.body?.revision;
-    if (!validId(req.params.id) || !values || !Number.isSafeInteger(revision) || revision < 0) return res.status(400).json({ success: false, message: '수정 정보를 올바르게 입력해주세요.' });
+    const revision = req.body?.revision;
+    if (!validId(req.params.id) || !Number.isSafeInteger(revision) || revision < 0) return res.status(400).json({ success: false, message: '수정 정보를 올바르게 입력해주세요.' });
     try {
-      const existing = await Collection.findOne({ _id: req.params.id, ownerId: req.user._id, deletedAt: null }).select('_id').lean();
+      const existing = await Collection.findOne({ _id: req.params.id, ownerId: req.user._id, deletedAt: null }).lean();
       if (!existing) return res.status(404).json({ success: false, message: '포트폴리오를 찾을 수 없습니다.' });
+      const values = input(req.body, existing);
+      if (!values) return res.status(400).json({ success: false, message: '수정 정보를 올바르게 입력해주세요.' });
       if (!await available(req.user._id, values.postIds)) return res.status(400).json({ success: false, message: '선택한 게시글이 변경되었습니다. 게시글 목록을 새로 불러와 선택해주세요.' });
       const item = await Collection.findOneAndUpdate({ _id: req.params.id, ownerId: req.user._id, deletedAt: null, revision },
         { $set: values, $inc: { revision: 1 } }, { new: true, runValidators: true }).lean();

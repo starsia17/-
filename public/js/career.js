@@ -56,13 +56,13 @@
     resumeTools = resumeFields(snapshot); resumeBox.append(snapshot); extras.append(resumeBox);
     include.addEventListener('change', () => { snapshot.hidden = !include.checked; resumeTools.busy(!include.checked); }); snapshot.hidden = true;
     importButton.addEventListener('click', async () => {
-      const version = epoch, generation = builderGeneration; importButton.disabled = true;
-      try { const data = await read('/api/career-profile', undefined, version); if (!form.hidden && version === epoch && generation === builderGeneration) { resumeTools.set(data.profile); include.checked = true; snapshot.hidden = false; noteHelp.textContent = '프로필을 가져왔습니다. 포트폴리오 저장 버튼을 눌러 적용하세요.'; } }
-      catch (error) { if (version === epoch) noteHelp.textContent = error.message; }
-      finally { if (version === epoch) importButton.disabled = false; }
+      const version = epoch, generation = builderGeneration; importButton.disabled = true; include.disabled = true; resumeTools.busy(true);
+      try { const data = await read('/api/career-profile', undefined, version); if (!form.hidden && version === epoch && generation === builderGeneration) { resumeTools.set(data.profile); include.checked = true; snapshot.hidden = false; resumeTools.busy(false); noteHelp.textContent = '프로필을 가져왔습니다. 포트폴리오 저장 버튼을 눌러 적용하세요.'; } }
+      catch (error) { if (version === epoch && generation === builderGeneration) noteHelp.textContent = error.message; }
+      finally { if (version === epoch && generation === builderGeneration) { importButton.disabled = false; include.disabled = false; resumeTools.busy(!include.checked); } }
     });
     const description = node('details', undefined, 'career-disclosure'); description.open = true; description.append(node('summary', '프로젝트 설명 · 양식과 자유 편집'));
-    const selectLabel = node('label', '설명할 작업 선택'); noteSelect = node('select'); selectLabel.append(noteSelect); description.append(selectLabel);
+    const selectLabel = node('label', '설명할 작업 선택'); noteSelect = node('select'); noteSelect.setAttribute('aria-label', '설명할 작업 선택'); selectLabel.append(noteSelect); description.append(selectLabel);
     noteHelp = node('p', '', 'portfolio-note'); noteHelp.setAttribute('role','status'); description.append(noteHelp);
     noteEditor = editor(description, '프로젝트 설명'); noteTemplate = templateButton(description, '프로젝트 설명 양식 넣기', noteEditor, projectTemplate);
     noteSelect.addEventListener('change', () => switchNote(noteSelect.value)); extras.append(description); form.append(extras);
@@ -93,8 +93,10 @@
     return { introduction: intro.innerText.trim().slice(0,2000), introductionHtml, targetCompany: company.value.trim(), targetRole: role.value.trim(), resume, projectNotes };
   }
   function busyBuilder(value) { if (!builderReady) return; if (value) builderGeneration++; introTools.setBusy(value); resumeTools.busy(value || !include.checked); noteEditor.tools.setBusy(value || !activeNote); noteTemplate.disabled = value || !activeNote; importButton.disabled = value; }
+  function leaveBuilder() { builderGeneration++; }
   // My page uses the same editor and keeps the profile private until explicitly included.
-  const profileHost = document.querySelector('#careerProfileHost'); let profileForm, profileTools, profileStatus, profileSave, profileRevision = 0, profileBusy = false, profileVisible = false;
+  const profileHost = document.querySelector('#careerProfileHost'); let profileForm, profileTools, profileStatus, profileSave, profileRevision = 0, profileBusy = false, profileVisible = false, profileLoaded = false, profileLoading = false;
+  function profileControls(busy) { profileTools.busy(busy); profileForm.querySelectorAll('.career-actions button').forEach(button => { button.disabled = busy; }); }
   function initProfile() {
     if (profileForm) return;
     profileForm = node('form', undefined, 'career-profile-form'); profileTools = resumeFields(profileForm);
@@ -103,34 +105,38 @@
     const pdf = node('button', '이력서 PDF 저장', 'career-secondary'); pdf.type = 'button'; const preview = node('button', '이력서 미리보기', 'career-secondary'); preview.type = 'button';
     const result = node('div', undefined, 'career-profile-preview');
     function render() { if (!profileForm.reportValidity()) return null; const value = profileTools.get(); result.replaceChildren(window.portfolioPresentation.resumeCard(value)); return result; }
-    preview.addEventListener('click', () => { render(); result.scrollIntoView({ behavior: 'smooth' }); });
-    pdf.addEventListener('click', async () => { const root = render(); if (!root) return; pdf.disabled = true; profileStatus.textContent = '인쇄 화면에서 PDF로 저장을 선택하세요. 모바일에서는 시스템 인쇄·공유 메뉴를 이용하세요.'; try { await window.portfolioPresentation.print(root, (profileTools.get().name || '나의') + ' 이력서'); } catch (e) { profileStatus.textContent = e.message; } finally { pdf.disabled = false; } });
+    preview.addEventListener('click', () => { if (render()) result.scrollIntoView({ behavior: 'smooth' }); });
+    pdf.addEventListener('click', async () => { const root = render(); if (!root) return; const version = epoch; pdf.disabled = true; profileStatus.textContent = '새 인쇄 화면에서 PDF 저장을 선택하세요. 작성 중인 내용은 이 화면에 유지됩니다.'; try { await window.portfolioPresentation.print(root, (profileTools.get().name || '나의') + ' 이력서'); } catch (e) { if (version === epoch) profileStatus.textContent = e.message; } finally { if (version === epoch) pdf.disabled = profileBusy || !profileLoaded; } });
     profileForm.addEventListener('input', () => { profileStatus.textContent = '저장하지 않은 변경 사항이 있습니다.'; result.replaceChildren(); });
     profileForm.addEventListener('submit', async event => {
-      event.preventDefault(); if (profileBusy || !profileForm.reportValidity()) return;
-      const version = epoch, request = profileRequest; profileBusy = true; profileSave.disabled = true; profileTools.busy(true);
+      event.preventDefault(); if (profileBusy || !profileLoaded || !profileForm.reportValidity()) return;
+      const version = epoch, request = profileRequest; profileBusy = true; profileControls(true);
       try { const data = await read('/api/career-profile', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profile: profileTools.get(), revision: profileRevision }) }, version);
         if (request !== profileRequest || version !== epoch) return; profileRevision = data.revision; profileTools.set(data.profile); profileStatus.textContent = '프로필을 저장했습니다. 기존 포트폴리오에 복사한 프로필은 자동으로 바뀌지 않습니다.';
       } catch (e) { if (version === epoch && request === profileRequest) profileStatus.textContent = e.message; }
-      finally { if (version === epoch && request === profileRequest) { profileBusy = false; profileSave.disabled = false; profileTools.busy(false); } }
+      finally { if (version === epoch && request === profileRequest) { profileBusy = false; profileControls(false); } }
     });
     actions.append(profileSave, preview, pdf); profileForm.append(actions, profileStatus, node('p','PDF에는 영상이 재생되지 않으며, 외부 영상은 링크로 표시됩니다. 인쇄 설정에서 배경 그래픽을 켜면 디자인을 더 잘 유지할 수 있어요.','portfolio-note'), result); profileHost.append(profileForm);
   }
   async function showProfile(visible) {
-    profileVisible = visible; const request = ++profileRequest, version = epoch;
-    if (!visible || !window.portfolioAuth.user) return;
-    initProfile(); let loaded = false; profileBusy = false; profileSave.disabled = true; profileTools.busy(true); profileStatus.textContent = '프로필을 불러오는 중…';
+    profileVisible = visible;
+    if (!visible || !window.portfolioAuth.user) { if (profileLoading) { profileRequest++; profileLoading = false; } return; }
+    // Route refreshes and background session checks must not discard a draft.
+    if (profileLoaded || profileLoading) return;
+    const request = ++profileRequest, version = epoch;
+    initProfile(); profileLoading = true; profileControls(true); profileStatus.textContent = '프로필을 불러오는 중…';
     try { const data = await read('/api/career-profile', undefined, version); if (request !== profileRequest || !profileVisible) return;
-      profileRevision = data.revision; profileTools.set(data.profile); profileStatus.textContent = ''; loaded = true;
+      profileRevision = data.revision; profileTools.set(data.profile); profileStatus.textContent = ''; profileLoaded = true;
     } catch (e) { if (version === epoch && request === profileRequest) { profileStatus.textContent = e.message; return; } }
-    finally { if (version === epoch && request === profileRequest) { profileSave.disabled = !loaded; profileTools.busy(!loaded); } }
+    finally { if (version === epoch && request === profileRequest) { profileLoading = false; profileControls(!profileLoaded); } }
   }
   document.addEventListener('portfolio:mypage-view', event => showProfile(event.detail.visible));
-  function syncUser(user) { const next = user?.id || null; if (identity === next) return; identity = next; epoch++; profileRequest++; profileBusy = false;
-    if (builderReady) { introTools.reset(); resumeTools.set(blank()); noteEditor.tools.reset(); notes.clear(); activeNote = ''; }
-    if (profileTools) { profileTools.set(blank()); profileStatus.textContent = ''; profileHost.querySelector('.career-profile-preview')?.replaceChildren(); }
+  function syncUser(user) { const next = user?.id || null; if (identity === next) return; identity = next; epoch++; profileRequest++; builderGeneration++; profileBusy = false; profileLoaded = false; profileLoading = false;
+    if (builderReady) { introTools.reset(); resumeTools.set(blank()); noteEditor.tools.reset(); notes.clear(); activeNote = ''; selectedPosts = []; company.value = ''; role.value = ''; include.checked = false; resumeSnapshot.hidden = true; noteSelect.replaceChildren(); noteHelp.textContent = ''; busyBuilder(true); }
+    if (profileTools) { profileTools.set(blank()); profileControls(true); profileStatus.textContent = ''; profileHost.querySelector('.career-profile-preview')?.replaceChildren(); }
+    if (user && location.hash === '#mypage/resume') showProfile(true);
   }
   document.addEventListener('portfolio:auth', event => syncUser(event.detail.user));
   window.portfolioAuth.ready.then(() => { syncUser(window.portfolioAuth.user); if (location.hash === '#mypage/resume') showProfile(true); });
-  window.portfolioCareer = { openBuilder, syncSelection, builderValues, busyBuilder };
+  window.portfolioCareer = { openBuilder, syncSelection, builderValues, busyBuilder, leaveBuilder };
 })();

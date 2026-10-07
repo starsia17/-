@@ -71,15 +71,36 @@
     if (!posts.length && !data.resume) projects.append(node('p', '현재 표시할 작업이 없습니다.'));
     collection.append(projects); return collection;
   }
-  let printing = false, priorTitle = '';
+  let printWindow = null, generation = 0, identity = window.portfolioAuth?.user?.id || null;
   function cleanup() {
-    document.querySelector('#careerPrintOutput')?.remove(); document.body.classList.remove('career-printing');
-    if (printing) document.title = priorTitle; printing = false;
+    generation++;
+    if (printWindow && !printWindow.closed) { printWindow.document.body.replaceChildren(); printWindow.close(); }
+    printWindow = null;
   }
   async function print(root, title) {
-    if (printing) throw Error('인쇄 창을 닫은 뒤 다시 시도해주세요.');
-    cleanup(); priorTitle = document.title; printing = true;
-    const copy = root.cloneNode(true), container = node('div', undefined, 'career-print-output'); container.id = 'careerPrintOutput';
+    // Open synchronously from the user's click. The editor and its selection
+    // stay in the original document, including when printing is cancelled.
+    cleanup();
+    const popup = window.open('', '_blank');
+    if (!popup) throw Error('인쇄 화면을 열 수 없습니다. 이 사이트의 팝업을 허용한 뒤 다시 눌러주세요.');
+    printWindow = popup; const version = generation;
+    popup.opener = null;
+    const doc = popup.document;
+    doc.open(); doc.write('<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>포트폴리브</title></head><body></body></html>'); doc.close();
+    const base = doc.createElement('base'); base.href = location.origin + '/'; doc.head.append(base);
+    doc.title = title || '포트폴리브';
+    const styles = [...document.querySelectorAll('link[rel="stylesheet"]')].map(link => {
+      // Loaded link/image clones can carry state from the editor's document.
+      // Create fresh resource elements in the print document instead.
+      const copy = doc.createElement('link'); copy.rel = 'stylesheet'; copy.href = link.href;
+      const loaded = new Promise(resolve => { copy.onload = resolve; copy.onerror = resolve; }); doc.head.append(copy); return loaded;
+    });
+    const controls = node('div', undefined, 'career-print-controls'), button = node('button', 'PDF 저장 · 인쇄', 'career-primary'); button.type = 'button'; button.disabled = true;
+    const message = node('p', '인쇄 문서를 준비하는 중…'); message.setAttribute('role', 'status');
+    controls.append(button, message); doc.body.append(controls);
+    const copy = doc.createElement(root.tagName), container = node('div', undefined, 'career-print-output'); container.id = 'careerPrintOutput';
+    for (const attribute of root.attributes) copy.setAttribute(attribute.name, attribute.value);
+    copy.innerHTML = root.innerHTML;
     copy.querySelectorAll('.curated-original').forEach(link => link.remove());
     copy.querySelectorAll('iframe,video').forEach(e => {
       const note = node('p', '영상은 웹 포트폴리오에서 확인해주세요.', 'pdf-media-note');
@@ -87,16 +108,31 @@
       e.replaceWith(note);
     });
     copy.querySelectorAll('a[href]').forEach(a => { if (new URL(a.href, location.origin).pathname.startsWith('/api/media/')) { a.removeAttribute('href'); a.removeAttribute('download'); a.append(document.createTextNode(' · 웹에서 열기')); } });
-    container.append(copy); document.body.append(container);
+    copy.querySelectorAll('[contenteditable]').forEach(e => e.removeAttribute('contenteditable'));
+    container.append(copy); doc.body.append(container); doc.body.classList.add('career-print-document');
     try {
       const images = [...copy.querySelectorAll('img')]; images.forEach(img => { img.loading = 'eager'; });
-      await Promise.race([Promise.all([document.fonts?.ready, ...images.map(img => img.complete ? Promise.resolve() : new Promise(resolve => { img.addEventListener('load', resolve, { once: true }); img.addEventListener('error', resolve, { once: true }); }))]), new Promise(resolve => setTimeout(resolve, 12000))]);
-      if (!printing) return;
-      document.title = title || '포트폴리브'; document.body.classList.add('career-printing'); window.print();
-    } catch (error) { cleanup(); throw error; }
+      let timer;
+      await Promise.race([Promise.all(styles).then(() => { copy.getBoundingClientRect(); return Promise.all([doc.fonts?.ready, ...images.map(img => img.complete ? Promise.resolve() : new Promise(resolve => { img.addEventListener('load', resolve, { once: true }); img.addEventListener('error', resolve, { once: true }); }))]); }), new Promise(resolve => { timer = setTimeout(resolve, 12000); })]);
+      clearTimeout(timer);
+      if (version !== generation || popup.closed) return;
+      const missing = images.some(img => !img.complete || !img.naturalWidth);
+      message.textContent = 'PDF 저장 · 인쇄를 눌러 대상에서 PDF 저장을 선택하세요. iPhone·iPad는 인쇄 미리보기를 확대한 뒤 공유 메뉴로 파일에 저장할 수 있어요.' + (missing ? ' 일부 이미지가 불러와지지 않았습니다. 연결 상태를 확인한 뒤 이 화면을 다시 열어주세요.' : '');
+      button.disabled = false;
+      const invoke = () => {
+        if (version !== generation || popup.closed) return;
+        if (typeof popup.print !== 'function') { message.textContent = '이 브라우저는 인쇄를 지원하지 않습니다. Safari 또는 Chrome에서 다시 열어주세요.'; return; }
+        popup.focus(); popup.print();
+      };
+      button.addEventListener('click', invoke);
+      // On phones keep the print button available as a fresh user gesture.
+      if (!window.matchMedia('(max-width: 760px)').matches) invoke();
+    } catch (error) { if (version === generation) cleanup(); throw error; }
   }
-  window.addEventListener('afterprint', cleanup);
   window.addEventListener('pagehide', cleanup);
-  document.addEventListener('portfolio:auth', event => { if (!event.detail.user) cleanup(); });
+  document.addEventListener('portfolio:auth', event => {
+    const next = event.detail.user?.id || null;
+    if (next !== identity) { identity = next; cleanup(); }
+  });
   window.portfolioPresentation = { render, resumeCard, print, cleanup };
 })();

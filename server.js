@@ -54,7 +54,8 @@ app.use('/api', async (req, res, next) => {
 
 app.get('/api/health', (req, res) => {
   const connected = mongoose.connection.readyState === 1;
-  res.status(connected ? 200 : 503).json({ database: connected ? 'connected' : 'disconnected' });
+  res.status(connected ? 200 : 503).json({ database: connected ? 'connected' : 'disconnected',
+    version: '1.0.0', commit: /^[a-f\d]{40}$/i.test(process.env.RENDER_GIT_COMMIT || '') ? process.env.RENDER_GIT_COMMIT : null });
 });
 
 const storage = multer.diskStorage({

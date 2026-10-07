@@ -1,9 +1,13 @@
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const express = require('express');
+const fs = require('node:fs');
+const { Types } = require('mongoose');
 const { sanitizeRichText, app: unusedApp } = require('./server');
 const plain = html => html.replace(/<[^>]*>/g,'');
-const copy = x => x == null ? x : structuredClone(x);
+const copy = x => x == null ? x : x instanceof Types.ObjectId ? new Types.ObjectId(x.toHexString()) :
+  x instanceof Date ? new Date(x) : Array.isArray(x) ? x.map(copy) : typeof x === 'object' ?
+    Object.fromEntries(Object.entries(x).map(([key,value])=>[key,copy(value)])) : x;
 function matches(row, query) {
   return Object.entries(query).every(([key, value]) => {
     if (key === '$or') return value.some(q => matches(row, q));
@@ -36,9 +40,12 @@ const app=express();app.use(express.json({limit:'4mb'}));
 const requireUser=(req,res,next)=>{req.user={_id:req.headers['x-fixture-user']||alice};next();};
 require('./career-profile')(app,users,requireUser,sanitizeRichText,plain);
 require('./portfolio-builder')(app,collections,posts,requireUser,p=>p,shares,sanitizeRichText,plain);
-require('./sharing')(app,shares,posts,collections,requireUser,()=>{});
+const fixtureImage = fs.readFileSync('public/assets/favicon.png');
+require('./sharing')(app,shares,posts,collections,requireUser,(req,res)=>res.type('png').send(fixtureImage));
+app.get('/api/media/:id',requireUser,(req,res)=>res.type('png').send(fixtureImage));
 app.get('/api/auth/session',(req,res)=>res.json({success:true,authenticated:true,user:{id:alice,username:'preview-user',kind:'member',canWriteNews:false}}));
 app.get('/api/posts',requireUser,(req,res)=>res.json({success:true,posts:copy(posts.rows.filter(p=>p.ownerId===req.user._id))}));
+app.get('/api/posts/:id',requireUser,(req,res)=>{const post=posts.rows.find(p=>p._id===req.params.id&&p.ownerId===req.user._id);res.status(post?200:404).json(post?{success:true,post:copy(post)}:{success:false,message:'게시글을 찾을 수 없습니다.'});});
 app.get('/api/account',(req,res)=>res.json({success:true,user:{id:alice,username:'preview-user',kind:'member',createdAt:new Date(),canWriteNews:false},changes:{remaining:2,resetsAt:new Date(Date.now()+86400000)}}));
 app.get('/api/notices',(req,res)=>res.json({success:true,notices:[]}));
 app.get('/api/news',(req,res)=>res.json({success:true,news:[],canWrite:false}));
@@ -70,6 +77,27 @@ app.use((err,req,res,next)=>res.status(500).json({success:false,message:err.mess
     const change={...body,title:'회사 A 포트폴리오',resume:null,revision:0,projectNotes:[{postId:postA,bodyHtml:'<p>회사별 설명</p>'}]};assert.equal((await call('/api/portfolios/'+duplicateId,'PATCH',change)).status,200);
     assert.equal((await call('/api/portfolios/'+duplicateId,'PATCH',change)).status,409);assert.equal((await call('/api/portfolios/'+id)).data.portfolio.projectNotes[0].bodyHtml,body.projectNotes[0].bodyHtml);
     const shared=await call('/api/shares/portfolio/'+id,'POST');const publicData=(await call('/api/shared/'+shared.data.token)).data;assert.deepEqual(publicData,preview.data);assert.equal(publicData.targetCompany,undefined);
+    // A legacy client can update the original fields without losing new data.
+    // MongoDB lean results contain ObjectIds, not the strings our HTTP DTO uses.
+    collections.rows.find(row=>row._id===id).projectNotes[0].postId=new Types.ObjectId(postA);
+    const legacy={title:'기존 화면에서 수정',introduction:'구형 소개',layout:'gallery',postIds:[postA],revision:0};
+    const preserved=await call('/api/portfolios/'+id,'PATCH',legacy);assert.equal(preserved.status,200);
+    for(const key of ['introductionHtml','targetCompany','targetRole','resume','projectNotes']) assert.deepEqual(preserved.data.portfolio[key],created.data.portfolio[key]);
+    assert.equal((await call('/api/portfolios/'+id,'PATCH',legacy)).status,409);
+    const malformed=await call('/api/portfolios/'+id,'PATCH',{...legacy,revision:1,projectNotes:null});assert.equal(malformed.status,400);
+    const cleared=await call('/api/portfolios/'+id,'PATCH',{...legacy,revision:1,introductionHtml:'',targetCompany:'',targetRole:'',resume:null,projectNotes:[]});assert.equal(cleared.status,200);assert.equal(cleared.data.portfolio.resume,null);assert.deepEqual(cleared.data.portfolio.projectNotes,[]);
+    // Keep the fixture useful for browser checks after the regression assertions.
+    const restored=await call('/api/portfolios/'+id,'PATCH',{...body,revision:2});assert.equal(restored.status,200);
+    const extra=await posts.create({ownerId:alice,title:'두 번째 프로젝트',category:'영상',description:'두 번째 원본',bodyHtml:'<p>두 번째 원본</p>',media:[]});
+    const multi=await call('/api/portfolios','POST',{...body,title:'복수 작업 검토',creationKey:crypto.randomUUID(),postIds:[postA,extra._id],projectNotes:[...body.projectNotes,{postId:extra._id,bodyHtml:'<p>두 번째 설명</p>'}]});assert.equal(multi.status,201);
+    const pruned=await call('/api/portfolios/'+multi.data.portfolio.id,'PATCH',{...legacy,revision:0});assert.equal(pruned.status,200);assert.deepEqual(pruned.data.portfolio.projectNotes,body.projectNotes);
+    await call('/api/portfolios/'+multi.data.portfolio.id,'DELETE');
+    const mediaId='333333333333333333333333';posts.rows[0].media=[{fileId:mediaId,type:'image',name:'검토 이미지',url:'/api/media/'+mediaId}];posts.rows[0].bodyHtml+='<figure><img src="/api/media/'+mediaId+'" alt="검토 이미지"></figure><p><a href="https://youtu.be/dQw4w9WgXcQ">영상 보기</a></p>';
+    const withMedia=(await call('/api/shared/'+shared.data.token)).data;
+    assert(withMedia.posts[0].bodyHtml.includes('/api/shared/'+shared.data.token+'/media/'+mediaId));
+    assert.equal(withMedia.posts[0].media[0].url,'/api/shared/'+shared.data.token+'/media/'+mediaId);
+    assert.equal((await fetch(base+withMedia.posts[0].media[0].url)).status,200);
+    assert.equal((await call('/api/shared/'+shared.data.token+'/media/444444444444444444444444')).status,404);
     await call('/api/portfolios/'+duplicateId,'DELETE');assert.equal((await call('/api/portfolios/'+duplicateId)).status,404);await call('/api/trash/portfolios/'+duplicateId+'/restore','POST');assert.equal((await call('/api/portfolios/'+duplicateId)).data.portfolio.projectNotes[0].bodyHtml,'<p>회사별 설명</p>');
     await call('/api/portfolios/'+id,'DELETE');assert.equal((await call('/api/shared/'+shared.data.token)).status,404);await call('/api/trash/portfolios/'+id+'/restore','POST');
     console.log('PASS: private profile, sanitization, validation, owner isolation, idempotency, copy independence, revisions, preview parity, sharing revocation and restore');
