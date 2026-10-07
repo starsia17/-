@@ -47,6 +47,7 @@
   }
   const api = window.portfolioAuth = {
     get user() { return user; }, fetch: safeFetch, refresh, mediaUrl,
+    acceptAccount(next) { ++epoch; setUser(next); channel?.postMessage('changed'); },
     expire() { clear('로그인이 만료되었습니다. 다시 로그인해주세요.'); },
     ready: null
   };

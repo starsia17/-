@@ -12,6 +12,7 @@ const PortfolioPost = require('./models/PortfolioPost');
 const PortfolioUser = require('./models/PortfolioUser');
 const PortfolioSession = require('./models/PortfolioSession');
 const PortfolioNotice = require('./models/PortfolioNotice');
+const PortfolioNews = require('./models/PortfolioNews');
 const auth = require('./auth')(PortfolioUser, PortfolioSession, process.env.PORTFOLIO_ADMIN_PASSWORD || '');
 
 const app = express();
@@ -67,6 +68,7 @@ const upload = multer({
 auth.mount(app);
 const requireUser = auth.requireUser;
 require('./notices')(app, PortfolioNotice, requireUser);
+require('./member-portal')(app, PortfolioUser, PortfolioSession, PortfolioNews, auth);
 
 app.get('/api/posts', requireUser, async (req, res) => {
   try {
@@ -485,7 +487,7 @@ app.use((err, req, res, next) => {
 async function start() {
   if (!MONGO_URI) throw new Error('MONGODB_URI 환경 변수를 설정해주세요.');
   await mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 10000 });
-  await Promise.all([PortfolioPost.createIndexes(), PortfolioUser.createIndexes(), PortfolioSession.createIndexes(), PortfolioNotice.createIndexes()]);
+  await Promise.all([PortfolioPost.createIndexes(), PortfolioUser.createIndexes(), PortfolioSession.createIndexes(), PortfolioNotice.createIndexes(), PortfolioNews.createIndexes()]);
   await auth.initializeAdmin(PortfolioPost);
   mediaBucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, { bucketName: GRIDFS_BUCKET_NAME });
   await purgeExpiredTrash();

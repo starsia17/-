@@ -9,6 +9,7 @@ function equal(a, b) {
   const left = Buffer.from(a || ''), right = Buffer.from(b || '');
   return left.length === right.length && crypto.timingSafeEqual(left, right);
 }
+const publicUser = user => ({ id: String(user._id), username: user.kind === 'admin' ? '관리자' : user.username, kind: user.kind, canWriteNews: user.kind === 'admin' || user.canWriteNews === true });
 
 module.exports = function createAuth(User, Session, adminPassword = '') {
   const attempts = new Map();
@@ -39,6 +40,7 @@ module.exports = function createAuth(User, Session, adminPassword = '') {
     if (!session.remember && !equal(digest(tab), session.tabHash)) return null;
     const user = await User.findById(session.userId);
     if (!user) return null;
+    if ((session.authVersion || 0) !== (user.authVersion || 0)) return null;
     await Session.updateOne({ _id: session._id }, { $set: { lastSeenAt: new Date(now), expiresAt: new Date(now + IDLE_MS) } });
     req.user = user; req.authSession = session;
     return user;
@@ -55,15 +57,15 @@ module.exports = function createAuth(User, Session, adminPassword = '') {
     const old = cookieToken(req);
     if (old) await Session.deleteOne({ tokenHash: digest(old) });
     const token = crypto.randomBytes(32).toString('hex');
-    await Session.create({ tokenHash: digest(token), userId: user._id, tabHash: digest(tab), remember: req.body.remember === true, lastSeenAt: new Date(), expiresAt: new Date(Date.now() + IDLE_MS) });
+    await Session.create({ tokenHash: digest(token), userId: user._id, tabHash: digest(tab), remember: req.body.remember === true, authVersion: user.authVersion || 0, lastSeenAt: new Date(), expiresAt: new Date(Date.now() + IDLE_MS) });
     setCookie(res, token);
-    res.json({ success: true, user: { username: user.kind === 'admin' ? '관리자' : user.username, kind: user.kind }, remember: req.body.remember === true });
+    res.json({ success: true, user: publicUser(user), remember: req.body.remember === true });
   }
   function mount(app) {
     app.get('/api/auth/session', async (req, res, next) => {
       try {
         const user = await authenticate(req);
-        res.json({ success: true, authenticated: !!user, user: user ? { username: user.kind === 'admin' ? '관리자' : user.username, kind: user.kind } : null });
+        res.json({ success: true, authenticated: !!user, user: user ? publicUser(user) : null });
       } catch (error) { next(error); }
     });
     app.post('/api/auth/register', rateLimit, async (req, res, next) => {
@@ -112,5 +114,5 @@ module.exports = function createAuth(User, Session, adminPassword = '') {
     const user = await User.findOneAndUpdate({ username: ADMIN_USERNAME }, { $setOnInsert: { username: ADMIN_USERNAME, kind: 'admin' } }, { upsert: true, new: true });
     await Post.updateMany({ ownerId: null }, { $set: { ownerId: user._id } });
   }
-  return { mount, requireUser, initializeAdmin, IDLE_MS };
+  return { mount, requireUser, initializeAdmin, rateLimit, IDLE_MS };
 };

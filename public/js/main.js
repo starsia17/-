@@ -27,6 +27,10 @@ let activeFilter = '전체';
 const composerUploads = [];
 const savedEditorRanges = new WeakMap();
 const editorToolbars = new WeakMap();
+const topbar = document.querySelector('.topbar');
+if (typeof ResizeObserver === 'function') {
+  new ResizeObserver(() => document.documentElement.style.setProperty('--topbar-height', Math.ceil(topbar.getBoundingClientRect().height) + 'px')).observe(topbar);
+}
 const lockedSelections = new WeakSet();
 let activeRichEditor = null;
 let dialogPost = null;
@@ -409,6 +413,23 @@ function styleSelection(target, property, value, keepControlFocus = false) {
 
 function wireEditorToolbar(toolbar, target, queue, queueChanged, existingMediaCount = 0) {
   editorToolbars.set(target, toolbar);
+  toolbar.dataset.editorMode = 'type';
+  let modeNav = toolbar.querySelector('.editor-mode-nav');
+  if (!modeNav) {
+    modeNav = document.createElement('div'); modeNav.className = 'editor-mode-nav';
+    modeNav.setAttribute('role', 'group'); modeNav.setAttribute('aria-label', '편집 도구 그룹 선택');
+    [['type', '글씨'], ['paragraph', '문단'], ['attachment', '첨부']].forEach(([mode, label]) => {
+      const button = document.createElement('button'); button.type = 'button'; button.dataset.editorModeButton = mode;
+      button.textContent = label; modeNav.append(button);
+    });
+    toolbar.prepend(modeNav);
+  }
+  const updateMode = mode => {
+    toolbar.dataset.editorMode = mode;
+    modeNav.querySelectorAll('button').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.editorModeButton === mode)));
+  };
+  modeNav.querySelectorAll('button').forEach(button => button.addEventListener('click', () => updateMode(button.dataset.editorModeButton)));
+  updateMode('type');
   target.addEventListener('focusin', () => { activeRichEditor = target; lockedSelections.delete(target); });
   toolbar.addEventListener('pointerdown', event => {
     const selection = window.getSelection();
@@ -625,12 +646,16 @@ function syncPageFromHash() {
   const isTrash = hash === 'trash';
   const isComposer = hash === 'write';
   const isNotice = hash === 'notices';
-  if (isDetail || isTrash || isComposer || isNotice) stopArchiveVideoPreviews();
-  document.querySelectorAll('main > section:not(.page-view)').forEach(section => { section.hidden = isDetail || isTrash || isComposer || isNotice; });
+  const isNews = hash === 'news';
+  const isMyPage = hash === 'mypage' || hash.startsWith('mypage/');
+  if (isDetail || isTrash || isComposer || isNotice || isNews || isMyPage) stopArchiveVideoPreviews();
+  document.querySelectorAll('main > section:not(.page-view)').forEach(section => { section.hidden = isDetail || isTrash || isComposer || isNotice || isNews || isMyPage; });
   detailView.hidden = !isDetail;
   trashSection.hidden = !isTrash;
   composerPage.hidden = !isComposer;
   window.portfolioNotices.setVisible(isNotice);
+  window.portfolioNews.setVisible(isNews);
+  window.portfolioMyPage.setVisible(isMyPage, hash.split('/')[1] || 'profile');
   if (isComposer) requestAnimationFrame(() => composerPage.scrollIntoView({ block: 'start' }));
   if (isDetail) loadPostDetail(hash.slice('post/'.length));
   if (isTrash) loadTrash();
