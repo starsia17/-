@@ -17,15 +17,18 @@
   <script src="/js/auth-ui.js?v=1" defer></script>
   <script src="/js/password-visibility.js?v=1" defer></script>
   <link rel="stylesheet" href="/css/password-visibility.css?v=1">
-  <script src="/js/sharing.js?v=1" defer></script>
+  <script src="/js/sharing.js?v=2" defer></script>
   <script src="/js/notices.js?v=2" defer></script>
   <script src="/js/news.js?v=1" defer></script>
-  <script src="/js/mypage.js?v=1" defer></script>
-  <script src="/js/main.js?v=private3" defer></script>
-  <script src="/js/portfolio-builder.js?v=3" defer></script>
+  <script src="/js/mypage.js?v=2" defer></script>
+  <script src="/js/main.js?v=private4" defer></script>
+  <script src="/js/portfolio-builder.js?v=4" defer></script>
   <link rel="stylesheet" href="/css/portfolio-builder.css?v=2">
   <link rel="stylesheet" href="/css/navigation.css?v=1">
   <script src="/js/navigation.js?v=1" defer></script>
+  <link rel="stylesheet" href="/css/career.css?v=1">
+  <script src="/js/portfolio-presentation.js?v=1" defer></script>
+  <script src="/js/career.js?v=1" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -146,7 +149,7 @@
         <div class="portfolio-builder-settings">
           <h3>1. 제목과 디자인</h3>
           <label>포트폴리오 제목<input name="title" required maxlength="100" placeholder="예: 나의 디자인 포트폴리오"></label>
-          <label>소개글<textarea name="introduction" rows="3" maxlength="2000" placeholder="작업에 대한 짧은 소개를 적어주세요."></textarea></label>
+          <label>소개글</label><div id="portfolioIntroToolbarHost"></div><div id="portfolioIntroEditor" class="rich-editor blog-article" contenteditable="true" role="textbox" aria-label="포트폴리오 소개글" aria-multiline="true" data-placeholder="지원 직무와 작업에 대한 소개를 작성하세요"></div>
           <label>디자인<select name="layout"><option value="auto">자동 추천</option><option value="gallery">갤러리 · 사진 중심</option><option value="story">스토리 · 본문 중심</option></select></label>
           <p class="portfolio-note">자동 추천은 이미지가 있는 게시글의 비율에 따라 디자인을 선택합니다.</p>
           <h3>2. 게시글 선택</h3>
@@ -260,7 +263,8 @@
     <section id="myPage" class="notices-page page-view" hidden aria-labelledby="myPageTitle">
       <a class="detail-back" href="#work">← 내 작업 아카이브</a>
       <div class="notices-heading"><div><p class="eyebrow">MY ACCOUNT</p><h1 id="myPageTitle">마이페이지<span>.</span></h1><p>내 정보와 계정 설정을 확인하세요.</p></div></div>
-      <nav class="mypage-tabs" aria-label="마이페이지 메뉴"><button type="button" data-my-view="profile" aria-pressed="true" class="active">내 정보</button><button type="button" data-my-view="account" aria-pressed="false">내 계정 정보</button><button id="membersTab" type="button" data-my-view="members" aria-pressed="false" hidden>회원 관리</button></nav>
+      <nav class="mypage-tabs" aria-label="마이페이지 메뉴"><button type="button" data-my-view="profile" aria-pressed="true" class="active">내 정보</button><button type="button" data-my-view="resume" aria-pressed="false">이력서·프로필</button><button type="button" data-my-view="account" aria-pressed="false">내 계정 정보</button><button id="membersTab" type="button" data-my-view="members" aria-pressed="false" hidden>회원 관리</button></nav>
+      <div data-my-panel="resume" class="mypage-panel" hidden><h2>이력서·프로필</h2><p class="portfolio-note">내 계정에만 저장됩니다. 포트폴리오에 넣기 옵션을 선택한 경우에만 해당 포트폴리오와 함께 공유됩니다.</p><div id="careerProfileHost"></div></div>
       <p id="myPageMessage" role="status" class="notice-status" hidden></p>
       <p id="myPageLoading" role="status" hidden>내 정보를 불러오는 중입니다.</p>
       <div data-my-panel="profile" class="mypage-panel"><h2>내 정보</h2><dl id="profileInfo" class="profile-info"></dl></div>

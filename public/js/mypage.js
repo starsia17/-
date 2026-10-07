@@ -39,7 +39,7 @@
     if (resetForm) { form.reset(); document.querySelector('#accountUsername').value = user.username; }
   }
   function showView(next) {
-    view = ['profile', 'account', 'members'].includes(next) ? next : 'profile';
+    view = ['profile', 'account', 'members', 'resume'].includes(next) ? next : 'profile';
     if (view === 'members' && !isAdmin()) view = 'profile';
     document.querySelectorAll('[data-my-panel]').forEach(node => { node.hidden = node.dataset.myPanel !== view; });
     document.querySelectorAll('[data-my-view]').forEach(node => { const active = node.dataset.myView === view; node.classList.toggle('active', active); node.setAttribute('aria-pressed', String(active)); });
@@ -95,6 +95,7 @@
   }
   function setVisible(visible, panel = 'profile') {
     page.hidden = !visible || !window.portfolioAuth.user;
+    document.dispatchEvent(new CustomEvent('portfolio:mypage-view', { detail: { visible: !page.hidden && panel === 'resume' } }));
     if (page.hidden) { request++; memberRequest++; loading.hidden = true; return; }
     showView(panel); loadAccount(); if (view === 'members') loadMembers();
   }

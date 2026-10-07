@@ -1093,7 +1093,7 @@ window.portfolioTextEditor = {
   mount(host, target) {
     const toolbar = document.querySelector('#composerToolbar').cloneNode(true);
     toolbar.removeAttribute('id'); toolbar.classList.add('notice-editor-toolbar');
-    toolbar.setAttribute('aria-label', '공지 본문 서식');
+    toolbar.setAttribute('aria-label', target.getAttribute('aria-label') + ' 서식');
     toolbar.querySelector('.attachment-group')?.remove();
     toolbar.querySelector('[data-editor-mode-button="attachment"]')?.remove();
     host.replaceWith(toolbar); wireEditorToolbar(toolbar, target, [], () => {});
@@ -1107,3 +1107,5 @@ window.portfolioTextEditor = {
   }
 };
 document.dispatchEvent(new Event('portfolio:editor-ready'));
+
+

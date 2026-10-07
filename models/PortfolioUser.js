@@ -5,6 +5,8 @@ const schema = new mongoose.Schema({
   passwordHash: { type: String, select: false },
   passwordSalt: { type: String, select: false },
   canWriteNews: { type: Boolean, default: false },
+  careerProfile: { type: mongoose.Schema.Types.Mixed, default: null },
+  careerRevision: { type: Number, default: 0 },
   authVersion: { type: Number, default: 0 },
   accountChangeWindowStart: { type: Date, default: null },
   accountChangeCount: { type: Number, default: 0 },

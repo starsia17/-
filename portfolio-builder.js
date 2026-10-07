@@ -1,6 +1,9 @@
-module.exports = function mount(app, Collection, Post, requireUser, serializePost, Share) {
+const { rich, resume } = require('./career-content');
+module.exports = function mount(app, Collection, Post, requireUser, serializePost, Share, sanitize, plain) {
   const validId = id => typeof id === 'string' && /^[a-f\d]{24}$/i.test(id);
   const summary = item => ({ id: String(item._id), title: item.title, introduction: item.introduction,
+    introductionHtml: item.introductionHtml || '', targetCompany: item.targetCompany || '', targetRole: item.targetRole || '',
+    resume: item.resume || null, projectNotes: (item.projectNotes || []).map(note => ({ postId: String(note.postId), bodyHtml: note.bodyHtml })),
     layout: item.layout, postIds: item.postIds.map(String), revision: item.revision || 0,
     createdAt: item.createdAt, updatedAt: item.updatedAt, deletedAt: item.deletedAt || null, expiresAt: item.expiresAt || null });
   function input(body) {
@@ -9,7 +12,18 @@ module.exports = function mount(app, Collection, Post, requireUser, serializePos
       !['auto', 'gallery', 'story'].includes(body.layout) || !Array.isArray(body.postIds) ||
       body.postIds.length < 1 || body.postIds.length > 200 || body.postIds.some(id => !validId(id)) ||
       new Set(body.postIds.map(id => id.toLowerCase())).size !== body.postIds.length) return null;
-    return { title: body.title.trim(), introduction: body.introduction.trim(), layout: body.layout, postIds: body.postIds };
+    try {
+      const introductionHtml = rich(body.introductionHtml || '', sanitize, plain);
+      const targetCompany = body.targetCompany || '', targetRole = body.targetRole || '';
+      if (typeof targetCompany !== 'string' || targetCompany.length > 100 || typeof targetRole !== 'string' || targetRole.length > 120) return null;
+      const notes = body.projectNotes || [];
+      if (!Array.isArray(notes) || notes.length > 200 || notes.some(note => !note || !validId(note.postId) || !body.postIds.some(id => id.toLowerCase() === note.postId.toLowerCase())) || new Set(notes.map(note => note.postId.toLowerCase())).size !== notes.length) return null;
+      const projectNotes = notes.map(note => ({ postId: note.postId.toLowerCase(), bodyHtml: rich(note.bodyHtml, sanitize, plain) }));
+      const profile = body.resume == null ? null : resume(body.resume, sanitize, plain);
+      if (introductionHtml.length + projectNotes.reduce((sum, note) => sum + note.bodyHtml.length, 0) + (profile?.bodyHtml.length || 0) > 600000) return null;
+      return { title: body.title.trim(), introduction: body.introduction.trim(), introductionHtml, targetCompany: targetCompany.trim(), targetRole: targetRole.trim(),
+        resume: profile, projectNotes, layout: body.layout, postIds: body.postIds };
+    } catch { return null; }
   }
   async function available(ownerId, ids) {
     return await Post.countDocuments({ ownerId, _id: { $in: ids }, deletedAt: null }) === ids.length;
@@ -45,6 +59,25 @@ module.exports = function mount(app, Collection, Post, requireUser, serializePos
       catch (error) { if (error.code !== 11000) throw error; item = await Collection.findOne({ ownerId: req.user._id, creationKey: key }).lean(); if (!item) throw error; }
       if (item.deletedAt) return res.status(409).json({ success: false, message: '이 포트폴리오는 휴지통에 있습니다. 휴지통에서 복원해주세요.' });
       res.status(201).json({ success: true, portfolio: summary(item) });
+    } catch (error) { next(error); }
+  });
+  app.post('/api/portfolios/:id/duplicate', requireUser, async (req, res, next) => {
+    const key = req.body?.creationKey;
+    if (!validId(req.params.id) || typeof key !== 'string' || !/^[\w-]{16,80}$/.test(key)) return res.status(400).json({ success: false, message: '복제 정보를 확인해주세요.' });
+    try {
+      const source = await Collection.findOne({ _id: req.params.id, ownerId: req.user._id, deletedAt: null }).lean();
+      if (!source) return res.status(404).json({ success: false, message: '복제할 포트폴리오를 찾을 수 없습니다.' });
+      let item = await Collection.findOne({ ownerId: req.user._id, creationKey: key }).lean();
+      if (!item) {
+        const values = summary(source);
+        const title = (source.title + ' · 복제본').slice(0, 100);
+        try { item = await Collection.create({ ownerId: req.user._id, creationKey: key, title, introduction: values.introduction,
+          introductionHtml: values.introductionHtml, targetCompany: values.targetCompany, targetRole: values.targetRole,
+          resume: values.resume, projectNotes: values.projectNotes, layout: values.layout, postIds: values.postIds }); }
+        catch (error) { if (error.code !== 11000) throw error; item = await Collection.findOne({ ownerId: req.user._id, creationKey: key }).lean(); if (!item) throw error; }
+      }
+      if (item.deletedAt) return res.status(409).json({ success: false, message: '복제본이 휴지통에 있습니다. 복원한 뒤 사용해주세요.' });
+      res.json({ success: true, portfolio: summary(item) });
     } catch (error) { next(error); }
   });
   app.patch('/api/portfolios/:id', requireUser, async (req, res, next) => {

@@ -33,7 +33,7 @@ const inlineMediaTypes = new Set([
 
 fs.mkdirSync(TEMP_UPLOAD_DIR, { recursive: true });
 app.set('trust proxy', true);
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '4mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api', (req, res, next) => {
   res.set('Cache-Control', 'private, no-store');
@@ -71,7 +71,8 @@ auth.mount(app);
 const requireUser = auth.requireUser;
 require('./notices')(app, PortfolioNotice, requireUser, sanitizeRichText, plainTextFromHtml);
 require('./member-portal')(app, PortfolioUser, PortfolioSession, PortfolioNews, auth);
-require('./portfolio-builder')(app, PortfolioCollection, PortfolioPost, requireUser, serializePost, PortfolioShare);
+require('./portfolio-builder')(app, PortfolioCollection, PortfolioPost, requireUser, serializePost, PortfolioShare, sanitizeRichText, plainTextFromHtml);
+require('./career-profile')(app, PortfolioUser, requireUser, sanitizeRichText, plainTextFromHtml);
 require('./sharing')(app, PortfolioShare, PortfolioPost, PortfolioCollection, requireUser, streamMedia);
 
 app.get('/api/posts', requireUser, async (req, res) => {
