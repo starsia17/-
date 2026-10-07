@@ -415,6 +415,11 @@ function styleSelection(target, property, value, keepControlFocus = false) {
 
 function wireEditorToolbar(toolbar, target, queue, queueChanged, existingMediaCount = 0) {
   editorToolbars.set(target, toolbar);
+  toolbar.querySelectorAll('button[aria-label]').forEach(button => { button.title = button.getAttribute('aria-label'); });
+  if (!toolbar.querySelector('.editor-selection-status')) {
+    const selectionStatus = document.createElement('p'); selectionStatus.className = 'editor-selection-status';
+    selectionStatus.textContent = '본문에서 글자를 선택한 뒤 서식을 바꿔주세요.'; selectionStatus.setAttribute('role', 'status'); toolbar.append(selectionStatus);
+  }
   toolbar.dataset.editorMode = 'type';
   let modeNav = toolbar.querySelector('.editor-mode-nav');
   if (!modeNav) {
@@ -647,7 +652,7 @@ function syncPageFromHash() {
   const isDetail = hash.startsWith('post/');
   const isTrash = hash === 'trash';
   const isComposer = hash === 'write';
-  const isNotice = hash === 'notices';
+  const isNotice = hash === 'notices' || hash === 'notices/new' || hash.startsWith('notice/');
   const isNews = hash === 'news';
   const isMyPage = hash === 'mypage' || hash.startsWith('mypage/');
   const isPortfolio = hash === 'portfolios' || hash === 'portfolios/new' || hash.startsWith('portfolio/');
@@ -656,7 +661,7 @@ function syncPageFromHash() {
   detailView.hidden = !isDetail;
   trashSection.hidden = !isTrash;
   composerPage.hidden = !isComposer;
-  window.portfolioNotices.setVisible(isNotice);
+  window.portfolioNotices.setVisible(isNotice, hash);
   window.portfolioNews.setVisible(isNews);
   window.portfolioMyPage.setVisible(isMyPage, hash.split('/')[1] || 'profile');
   window.portfolioBuilder?.setVisible(isPortfolio, hash);
@@ -768,7 +773,7 @@ async function loadPostDetail(id) {
       const actions = document.createElement('div'); actions.className = 'detail-actions';
       const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'edit-post-button'; edit.textContent = '게시물 수정';
       edit.addEventListener('click', () => beginInlinePostEdit(post, { title, category, categoryEditor, article }));
-      actions.append(edit);
+      actions.append(edit, window.portfolioShareButton('post', post._id));
       const remove = document.createElement('button'); remove.className = 'delete-post-button'; remove.textContent = '휴지통으로 이동';
       remove.addEventListener('click', async () => {
         if (!window.confirm(`“${post.title}” 게시물을 휴지통으로 이동할까요? 30일 안에 복원할 수 있습니다.`)) return;
@@ -1083,3 +1088,22 @@ window.portfolioPostBody = function renderPortfolioPostBody(post, root) {
   });
   if (media.childElementCount) root.append(media);
 };
+
+window.portfolioTextEditor = {
+  mount(host, target) {
+    const toolbar = document.querySelector('#composerToolbar').cloneNode(true);
+    toolbar.removeAttribute('id'); toolbar.classList.add('notice-editor-toolbar');
+    toolbar.setAttribute('aria-label', '공지 본문 서식');
+    toolbar.querySelector('.attachment-group')?.remove();
+    toolbar.querySelector('[data-editor-mode-button="attachment"]')?.remove();
+    host.replaceWith(toolbar); wireEditorToolbar(toolbar, target, [], () => {});
+    return {
+      html: () => canonicalBody(target),
+      reset: () => { target.replaceChildren(); savedEditorRanges.delete(target); lockedSelections.delete(target); },
+      setBusy: busy => {
+        target.contentEditable = String(!busy); toolbar.querySelectorAll('button,input,select').forEach(node => { node.disabled = busy; });
+      }
+    };
+  }
+};
+document.dispatchEvent(new Event('portfolio:editor-ready'));

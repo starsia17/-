@@ -131,7 +131,7 @@
         const back = node('a', '← 내 포트폴리오'); back.href = '#portfolios';
         const edit = node('a', '구성 수정'); edit.href = '#portfolio/' + data.portfolio.id + '/edit';
         const remove = node('button', '휴지통으로 이동', 'portfolio-trash-button'); remove.type = 'button';
-        remove.addEventListener('click', () => moveToTrash(data.portfolio, remove)); actions.append(back, edit, remove);
+        remove.addEventListener('click', () => moveToTrash(data.portfolio, remove)); actions.append(back, edit, window.portfolioShareButton('portfolio', data.portfolio.id), remove);
         renderPortfolio(data.portfolio); output.prepend(actions);
       } else throw Error('올바르지 않은 포트폴리오 주소입니다.');
       status(editing?.unavailableCount ? '휴지통에 있거나 삭제된 게시글은 선택 목록에서 제외했습니다. 저장하면 현재 선택한 게시글로 구성이 변경됩니다.' : '');

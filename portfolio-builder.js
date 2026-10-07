@@ -1,4 +1,4 @@
-module.exports = function mount(app, Collection, Post, requireUser, serializePost) {
+module.exports = function mount(app, Collection, Post, requireUser, serializePost, Share) {
   const validId = id => typeof id === 'string' && /^[a-f\d]{24}$/i.test(id);
   const summary = item => ({ id: String(item._id), title: item.title, introduction: item.introduction,
     layout: item.layout, postIds: item.postIds.map(String), revision: item.revision || 0,
@@ -67,6 +67,7 @@ module.exports = function mount(app, Collection, Post, requireUser, serializePos
       const item = await Collection.findOneAndUpdate({ _id: req.params.id, ownerId: req.user._id, deletedAt: null },
         { $set: { deletedAt, expiresAt }, $inc: { revision: 1 } }, { new: true }).lean();
       if (!item) return res.status(404).json({ success: false, message: '포트폴리오를 찾을 수 없거나 이미 휴지통에 있습니다.' });
+      await Share.deleteMany({ ownerId: req.user._id, type: 'portfolio', sourceId: item._id });
       res.json({ success: true, portfolio: summary(item) });
     } catch (error) { next(error); }
   });

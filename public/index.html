@@ -12,14 +12,15 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@300;400;500;600;700;800;900&family=Noto+Serif+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/style.css?v=2">
   <link rel="stylesheet" href="/css/brand.css">
   <script src="/js/auth-ui.js?v=1" defer></script>
-  <script src="/js/notices.js?v=1" defer></script>
+  <script src="/js/sharing.js?v=1" defer></script>
+  <script src="/js/notices.js?v=2" defer></script>
   <script src="/js/news.js?v=1" defer></script>
   <script src="/js/mypage.js?v=1" defer></script>
-  <script src="/js/main.js?v=private2" defer></script>
-  <script src="/js/portfolio-builder.js?v=2" defer></script>
+  <script src="/js/main.js?v=private3" defer></script>
+  <script src="/js/portfolio-builder.js?v=3" defer></script>
   <link rel="stylesheet" href="/css/portfolio-builder.css?v=2">
 </head>
 <body>
@@ -225,16 +226,17 @@
         <button id="writeNoticeButton" class="edit-post-button" type="button" aria-expanded="false" aria-controls="noticeComposer" hidden>공지 작성</button>
       </div>
       <form id="noticeComposer" class="notice-composer" hidden>
-        <h2>새 공지 작성</h2>
+        <h2 id="noticeComposeTitle">새 공지 작성</h2>
         <p class="notice-sharing-hint">등록한 공지는 모든 로그인 사용자에게 공개됩니다.</p>
         <label for="noticeTitleInput">공지 제목</label><input id="noticeTitleInput" name="title" maxlength="120" placeholder="공지 제목을 입력하세요" required>
-        <label for="noticeContentInput">공지 내용</label><textarea id="noticeContentInput" name="content" maxlength="25000" rows="10" placeholder="전하고 싶은 소식을 작성하세요" required></textarea>
+        <label for="noticeContentInput">공지 내용 · 최대 25,000자</label><div id="noticeToolbarHost"></div><div id="noticeContentInput" class="rich-editor blog-article" contenteditable="true" role="textbox" aria-multiline="true" aria-label="공지 내용 편집" data-placeholder="전하고 싶은 소식을 작성하세요"></div>
         <div class="notice-compose-actions"><button id="cancelNoticeButton" type="button" class="cancel-edit-button">작성 취소</button><button id="publishNoticeButton" type="submit" class="edit-post-button">공지 등록</button></div>
       </form>
       <p id="noticeMessage" role="status" class="notice-status" hidden></p>
       <p id="noticeLoading" role="status" hidden>공지사항을 불러오는 중입니다.</p>
       <p id="noticeEmpty" class="notice-empty" hidden>아직 등록된 공지사항이 없습니다.</p>
       <div id="noticeList" class="notice-list"></div>
+      <div id="noticeDetail" hidden></div>
     </section>
     <section id="newsPage" class="notices-page page-view" hidden aria-labelledby="newsTitle">
       <a class="detail-back" href="#work">← 내 작업 아카이브</a>

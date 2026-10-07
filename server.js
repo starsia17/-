@@ -14,6 +14,7 @@ const PortfolioSession = require('./models/PortfolioSession');
 const PortfolioNotice = require('./models/PortfolioNotice');
 const PortfolioNews = require('./models/PortfolioNews');
 const PortfolioCollection = require('./models/PortfolioCollection');
+const PortfolioShare = require('./models/PortfolioShare');
 const auth = require('./auth')(PortfolioUser, PortfolioSession, process.env.PORTFOLIO_ADMIN_PASSWORD || '');
 
 const app = express();
@@ -68,9 +69,10 @@ const upload = multer({
 
 auth.mount(app);
 const requireUser = auth.requireUser;
-require('./notices')(app, PortfolioNotice, requireUser);
+require('./notices')(app, PortfolioNotice, requireUser, sanitizeRichText, plainTextFromHtml);
 require('./member-portal')(app, PortfolioUser, PortfolioSession, PortfolioNews, auth);
-require('./portfolio-builder')(app, PortfolioCollection, PortfolioPost, requireUser, serializePost);
+require('./portfolio-builder')(app, PortfolioCollection, PortfolioPost, requireUser, serializePost, PortfolioShare);
+require('./sharing')(app, PortfolioShare, PortfolioPost, PortfolioCollection, requireUser, streamMedia);
 
 app.get('/api/posts', requireUser, async (req, res) => {
   try {
@@ -119,6 +121,7 @@ app.delete('/api/posts/:id', requireUser, async (req, res) => {
     const post = await PortfolioPost.findOneAndUpdate({ _id: req.params.id, ownerId: req.user._id, deletedAt: null },
       { $set: { deletedAt, expiresAt: new Date(deletedAt.getTime() + TRASH_RETENTION_MS) } }, { new: true });
     if (!post) return res.status(404).json({ success: false, message: '게시물을 찾을 수 없거나 이미 휴지통에 있습니다.' });
+    await PortfolioShare.deleteMany({ ownerId: req.user._id, type: 'post', sourceId: post._id });
     res.json({ success: true, post: serializePost(post) });
   } catch (err) {
     console.error('게시물 휴지통 이동 실패:', err);
@@ -187,52 +190,7 @@ app.get('/api/media/:id', requireUser, async (req, res) => {
     const fileId = new mongoose.Types.ObjectId(req.params.id);
     const ownerPost = await PortfolioPost.findOne({ ownerId: req.user._id, 'media.fileId': fileId }).select('_id');
     if (!ownerPost) return res.status(404).json({ success: false, message: '미디어 파일을 찾을 수 없습니다.' });
-    const file = await mediaBucket.find({ _id: fileId }).next();
-    if (!file) return res.status(404).json({ success: false, message: '미디어 파일을 찾을 수 없습니다.' });
-    let start = 0;
-    let end = file.length - 1;
-    let status = 200;
-    const range = req.headers.range;
-    if (range) {
-      const match = /^bytes=(\d*)-(\d*)$/.exec(range);
-      if (!match || (!match[1] && !match[2])) {
-        res.set('Content-Range', `bytes */${file.length}`);
-        return res.status(416).end();
-      }
-      if (!match[1]) {
-        const suffixLength = Number(match[2]);
-        if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) {
-          res.set('Content-Range', `bytes */${file.length}`);
-          return res.status(416).end();
-        }
-        start = Math.max(file.length - suffixLength, 0);
-      } else {
-        start = Number(match[1]);
-        end = match[2] ? Math.min(Number(match[2]), file.length - 1) : file.length - 1;
-      }
-      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start >= file.length || start > end) {
-        res.set('Content-Range', `bytes */${file.length}`);
-        return res.status(416).end();
-      }
-      status = 206;
-      res.set('Content-Range', `bytes ${start}-${end}/${file.length}`);
-    }
-    res.set({
-      'Content-Type': inlineMediaTypes.has(file.metadata?.contentType) ? file.metadata.contentType : 'application/octet-stream',
-      'Content-Length': String(Math.max(0, end - start + 1)),
-      'Content-Disposition': file.metadata?.kind === 'file'
-        ? `attachment; filename*=UTF-8''${encodeURIComponent(file.metadata.originalName || 'download')}`
-        : 'inline',
-      'X-Content-Type-Options': 'nosniff',
-      'Accept-Ranges': 'bytes',
-      'Cache-Control': 'private, no-store'
-    });
-    const download = mediaBucket.openDownloadStream(fileId, { start, end: end + 1 });
-    download.on('error', error => {
-      if (res.headersSent) res.destroy(error);
-      else res.status(404).end();
-    });
-    download.pipe(res.status(status));
+    await streamMedia(req, res, fileId);
   } catch (err) {
     res.status(500).json({ success: false, message: '미디어 파일을 불러오지 못했습니다.' });
   }
@@ -500,7 +458,7 @@ app.use((err, req, res, next) => {
 async function start() {
   if (!MONGO_URI) throw new Error('MONGODB_URI 환경 변수를 설정해주세요.');
   await mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 10000 });
-  await Promise.all([PortfolioPost.createIndexes(), PortfolioUser.createIndexes(), PortfolioSession.createIndexes(), PortfolioNotice.createIndexes(), PortfolioNews.createIndexes(), PortfolioCollection.createIndexes()]);
+  await Promise.all([PortfolioPost.createIndexes(), PortfolioUser.createIndexes(), PortfolioSession.createIndexes(), PortfolioNotice.createIndexes(), PortfolioNews.createIndexes(), PortfolioCollection.createIndexes(), PortfolioShare.createIndexes()]);
   await auth.initializeAdmin(PortfolioPost);
   mediaBucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, { bucketName: GRIDFS_BUCKET_NAME });
   await purgeExpiredTrash();
@@ -513,3 +471,55 @@ async function start() {
 }
 module.exports = { app, start, sanitizeRichText, auth };
 if (require.main === module) start().catch(error => { console.error('서버 시작 실패:', error.message); process.exit(1); });
+
+async function streamMedia(req, res, rawId) {
+  try {
+    const fileId = new mongoose.Types.ObjectId(String(rawId));
+    const file = await mediaBucket.find({ _id: fileId }).next();
+    if (!file) return res.status(404).json({ success: false, message: '미디어 파일을 찾을 수 없습니다.' });
+    let start = 0;
+    let end = file.length - 1;
+    let status = 200;
+    const range = req.headers.range;
+    if (range) {
+      const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+      if (!match || (!match[1] && !match[2])) {
+        res.set('Content-Range', `bytes */${file.length}`);
+        return res.status(416).end();
+      }
+      if (!match[1]) {
+        const suffixLength = Number(match[2]);
+        if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) {
+          res.set('Content-Range', `bytes */${file.length}`);
+          return res.status(416).end();
+        }
+        start = Math.max(file.length - suffixLength, 0);
+      } else {
+        start = Number(match[1]);
+        end = match[2] ? Math.min(Number(match[2]), file.length - 1) : file.length - 1;
+      }
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start >= file.length || start > end) {
+        res.set('Content-Range', `bytes */${file.length}`);
+        return res.status(416).end();
+      }
+      status = 206;
+      res.set('Content-Range', `bytes ${start}-${end}/${file.length}`);
+    }
+    res.set({
+      'Content-Type': inlineMediaTypes.has(file.metadata?.contentType) ? file.metadata.contentType : 'application/octet-stream',
+      'Content-Length': String(Math.max(0, end - start + 1)),
+      'Content-Disposition': file.metadata?.kind === 'file'
+        ? `attachment; filename*=UTF-8''${encodeURIComponent(file.metadata.originalName || 'download')}`
+        : 'inline',
+      'X-Content-Type-Options': 'nosniff',
+      'Accept-Ranges': 'bytes',
+      'Cache-Control': 'private, no-store'
+    });
+    const download = mediaBucket.openDownloadStream(fileId, { start, end: end + 1 });
+    download.on('error', error => {
+      if (res.headersSent) res.destroy(error);
+      else res.status(404).end();
+    });
+    download.pipe(res.status(status));
+  } catch (error) { if (res.headersSent) res.destroy(error); else res.status(500).json({ success: false, message: '미디어 파일을 불러오지 못했습니다.' }); }
+}
