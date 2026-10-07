@@ -19,12 +19,15 @@
   <script src="/js/news.js?v=1" defer></script>
   <script src="/js/mypage.js?v=1" defer></script>
   <script src="/js/main.js?v=private1" defer></script>
+  <script src="/js/portfolio-builder.js?v=1" defer></script>
+  <link rel="stylesheet" href="/css/portfolio-builder.css?v=1">
 </head>
 <body>
   <header class="topbar">
     <a class="wordmark" href="#top" aria-label="작업 아카이브 홈"><img class="brand-logo" src="/assets/site-logo.svg?v=3" alt="ARCHIVE · Portfolio for My Dream"></a>
     <nav data-private hidden class="top-nav" aria-label="주요 메뉴">
       <a href="#work">작업물</a>
+      <a href="#portfolios">내 포트폴리오</a>
       <a href="#about">소개</a>
       <a id="trashNav" href="#trash" hidden>휴지통</a>
       <a href="#notices">공지사항</a>
@@ -105,7 +108,7 @@
     <section class="work-section" id="work">
       <div class="section-heading">
         <div><p class="eyebrow">SELECTED & PERSONAL</p><h2>작업 아카이브<span>.</span></h2></div>
-        <div class="archive-heading-actions"><div class="work-count"><span id="postCount">00</span> WORKS</div><a class="archive-write-button" href="#write">게시글 등록하기 <span aria-hidden="true">↗</span></a></div>
+        <div class="archive-heading-actions"><div class="work-count"><span id="postCount">00</span> WORKS</div><a class="archive-write-button" href="#portfolios/new">포트폴리오로 꾸미기 <span aria-hidden="true">✳</span></a><a class="archive-write-button" href="#write">게시글 등록하기 <span aria-hidden="true">↗</span></a></div>
       </div>
       <div class="toolbar">
         <div class="filters" role="group" aria-label="작업물 분류">
@@ -126,6 +129,30 @@
       <p id="loadError" class="notice" role="status" hidden></p>
     </section>
 
+    <section id="portfolioPage" class="portfolio-page page-view" hidden aria-labelledby="portfolioPageTitle">
+      <div class="section-heading"><div><p class="eyebrow">CURATE YOUR WORK</p><h2 id="portfolioPageTitle">내 포트폴리오<span>.</span></h2></div><a class="archive-write-button" href="#portfolios/new">새 포트폴리오 만들기 ↗</a></div>
+      <p class="portfolio-note">본인의 작업을 선택해 하나의 포트폴리오로 정리하세요. 만든 포트폴리오는 내 계정에서만 볼 수 있습니다.</p>
+      <p id="portfolioStatus" class="notice" role="status" hidden></p>
+      <div id="portfolioList" class="portfolio-list"></div>
+      <form id="portfolioBuilderForm" class="portfolio-builder-form" hidden>
+        <div class="portfolio-builder-settings">
+          <h3>1. 제목과 디자인</h3>
+          <label>포트폴리오 제목<input name="title" required maxlength="100" placeholder="예: 나의 디자인 포트폴리오"></label>
+          <label>소개글<textarea name="introduction" rows="3" maxlength="2000" placeholder="작업에 대한 짧은 소개를 적어주세요."></textarea></label>
+          <label>디자인<select name="layout"><option value="auto">자동 추천</option><option value="gallery">갤러리 · 사진 중심</option><option value="story">스토리 · 본문 중심</option></select></label>
+          <p class="portfolio-note">자동 추천은 이미지가 있는 게시글의 비율에 따라 디자인을 선택합니다.</p>
+          <h3>2. 게시글 선택</h3>
+          <label>작업 검색<input id="portfolioSearch" type="search" placeholder="제목 또는 분류 검색"></label>
+          <p id="portfolioSelectionCount" role="status">0개 선택</p>
+          <div id="portfolioChoices" class="portfolio-choices"></div>
+        </div>
+        <div class="portfolio-builder-order"><h3>3. 표시 순서</h3><p class="portfolio-note">위·아래 버튼으로 작업 순서를 바꿀 수 있습니다.</p><ol id="portfolioOrder"></ol>
+          <div class="portfolio-builder-actions"><button id="portfolioPreviewButton" type="button">미리보기</button><button id="portfolioSaveButton" type="submit">만들기</button><a href="#portfolios">취소</a></div>
+          <p class="portfolio-note">원본 게시글을 그대로 연결합니다. 원본 수정은 여기에 반영되며 휴지통에 있는 글은 표시하지 않습니다. 복원하면 다시 표시됩니다.</p>
+        </div>
+      </form>
+      <div id="portfolioOutput"></div>
+    </section>
     <section id="postDetail" class="post-detail page-view" hidden aria-live="polite"></section>
     <section id="trashSection" class="trash-section page-view" hidden>
       <div class="section-heading"><div><p class="eyebrow">RECENTLY DELETED</p><h2>휴지통<span>.</span></h2></div><div class="work-count">30일 뒤 자동 삭제</div></div>
@@ -270,5 +297,3 @@
   </dialog>
 </body>
 </html>
-
-

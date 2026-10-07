@@ -648,14 +648,16 @@ function syncPageFromHash() {
   const isNotice = hash === 'notices';
   const isNews = hash === 'news';
   const isMyPage = hash === 'mypage' || hash.startsWith('mypage/');
-  if (isDetail || isTrash || isComposer || isNotice || isNews || isMyPage) stopArchiveVideoPreviews();
-  document.querySelectorAll('main > section:not(.page-view)').forEach(section => { section.hidden = isDetail || isTrash || isComposer || isNotice || isNews || isMyPage; });
+  const isPortfolio = hash === 'portfolios' || hash === 'portfolios/new' || hash.startsWith('portfolio/');
+  if (isDetail || isTrash || isComposer || isNotice || isNews || isMyPage || isPortfolio) stopArchiveVideoPreviews();
+  document.querySelectorAll('main > section:not(.page-view)').forEach(section => { section.hidden = isDetail || isTrash || isComposer || isNotice || isNews || isMyPage || isPortfolio; });
   detailView.hidden = !isDetail;
   trashSection.hidden = !isTrash;
   composerPage.hidden = !isComposer;
   window.portfolioNotices.setVisible(isNotice);
   window.portfolioNews.setVisible(isNews);
   window.portfolioMyPage.setVisible(isMyPage, hash.split('/')[1] || 'profile');
+  window.portfolioBuilder?.setVisible(isPortfolio, hash);
   if (isComposer) requestAnimationFrame(() => composerPage.scrollIntoView({ block: 'start' }));
   if (isDetail) loadPostDetail(hash.slice('post/'.length));
   if (isTrash) loadTrash();
@@ -1023,4 +1025,24 @@ document.querySelector('#closeDialog').addEventListener('click', () => dialog.cl
 dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
 dialog.addEventListener('close', () => { dialogMedia.replaceChildren(); dialogPost = null; });
 
-
+// Portfolio views use the same authenticated media and rich text rendering as posts.
+window.portfolioPostBody = function renderPortfolioPostBody(post, root) {
+  const article = document.createElement('article'); article.className = 'blog-article';
+  if (post.bodyHtml) article.innerHTML = post.bodyHtml;
+  else { const text = document.createElement('p'); text.textContent = post.description || ''; article.append(text); }
+  const embedded = new Set(Array.from(article.querySelectorAll('img[src],video[src],a[href]'), node => node.getAttribute('src') || node.getAttribute('href')));
+  hydratePrivateMedia(article); renderExternalVideoLinks(article);
+  root.append(article);
+  const media = document.createElement('div'); media.className = 'detail-media-list';
+  (post.media || []).filter(item => !embedded.has(item.url)).forEach(item => {
+    const node = document.createElement(item.type === 'file' ? 'a' : item.type === 'video' ? 'video' : 'img');
+    if (item.type === 'file') { node.href = privateMediaUrl(item.url); node.className = 'detail-file-link'; node.textContent = '↓ ' + (item.name || '첨부 파일'); }
+    else {
+      node.src = privateMediaUrl(item.url);
+      if (item.type === 'video') { node.controls = true; node.playsInline = true; node.preload = 'metadata'; }
+      else { node.alt = item.name || post.title; node.loading = 'lazy'; }
+    }
+    media.append(node);
+  });
+  if (media.childElementCount) root.append(media);
+};
