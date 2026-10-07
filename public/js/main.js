@@ -75,7 +75,7 @@ function applyAuthState(user) {
   const videoLinkDialog = document.querySelector('#videoLinkDialog');
   if (videoLinkDialog.open) videoLinkDialog.close('cancel');
   document.querySelector('#trashNav').hidden = !user;
-  if (user) loadPosts();
+  if (user) { syncPageFromHash(); loadPosts(); }
 }
 document.addEventListener('portfolio:auth', event => applyAuthState(event.detail.user));
 window.portfolioAuth.ready.then(() => applyAuthState(window.portfolioAuth.user));
@@ -624,11 +624,13 @@ function syncPageFromHash() {
   const isDetail = hash.startsWith('post/');
   const isTrash = hash === 'trash';
   const isComposer = hash === 'write';
-  if (isDetail || isTrash || isComposer) stopArchiveVideoPreviews();
-  document.querySelectorAll('main > section:not(.page-view)').forEach(section => { section.hidden = isDetail || isTrash || isComposer; });
+  const isNotice = hash === 'notices';
+  if (isDetail || isTrash || isComposer || isNotice) stopArchiveVideoPreviews();
+  document.querySelectorAll('main > section:not(.page-view)').forEach(section => { section.hidden = isDetail || isTrash || isComposer || isNotice; });
   detailView.hidden = !isDetail;
   trashSection.hidden = !isTrash;
   composerPage.hidden = !isComposer;
+  window.portfolioNotices.setVisible(isNotice);
   if (isComposer) requestAnimationFrame(() => composerPage.scrollIntoView({ block: 'start' }));
   if (isDetail) loadPostDetail(hash.slice('post/'.length));
   if (isTrash) loadTrash();

@@ -15,6 +15,7 @@
   <link rel="stylesheet" href="/css/style.css">
   <link rel="stylesheet" href="/css/brand.css">
   <script src="/js/auth-ui.js?v=1" defer></script>
+  <script src="/js/notices.js?v=1" defer></script>
   <script src="/js/main.js?v=private1" defer></script>
 </head>
 <body>
@@ -24,6 +25,7 @@
       <a href="#work">작업물</a>
       <a href="#about">소개</a>
       <a id="trashNav" href="#trash" hidden>휴지통</a>
+      <a href="#notices">공지사항</a>
       <details class="nav-dropdown">
         <summary>바로가기</summary>
         <div class="nav-dropdown-panel" aria-label="Adobe 바로가기">
@@ -184,6 +186,24 @@
         <button id="cancelEditButton" class="cancel-edit-button" type="button" hidden>수정 취소</button>
         <p class="form-footnote">제목, 작업 이야기, 첨부 파일이 하나의 게시물로 저장됩니다.</p>
       </form>
+    </section>
+    <section id="noticesPage" class="notices-page page-view" hidden aria-labelledby="noticesTitle">
+      <a class="detail-back" href="#work">← 내 작업 아카이브</a>
+      <div class="notices-heading">
+        <div><p class="eyebrow">NOTICE BOARD</p><h1 id="noticesTitle">공지사항<span>.</span></h1><p>관리자가 전하는 소식을 확인하세요.</p></div>
+        <button id="writeNoticeButton" class="edit-post-button" type="button" aria-expanded="false" aria-controls="noticeComposer" hidden>공지 작성</button>
+      </div>
+      <form id="noticeComposer" class="notice-composer" hidden>
+        <h2>새 공지 작성</h2>
+        <p class="notice-sharing-hint">등록한 공지는 모든 로그인 사용자에게 공개됩니다.</p>
+        <label for="noticeTitleInput">공지 제목</label><input id="noticeTitleInput" name="title" maxlength="120" placeholder="공지 제목을 입력하세요" required>
+        <label for="noticeContentInput">공지 내용</label><textarea id="noticeContentInput" name="content" maxlength="25000" rows="10" placeholder="전하고 싶은 소식을 작성하세요" required></textarea>
+        <div class="notice-compose-actions"><button id="cancelNoticeButton" type="button" class="cancel-edit-button">작성 취소</button><button id="publishNoticeButton" type="submit" class="edit-post-button">공지 등록</button></div>
+      </form>
+      <p id="noticeMessage" role="status" class="notice-status" hidden></p>
+      <p id="noticeLoading" role="status" hidden>공지사항을 불러오는 중입니다.</p>
+      <p id="noticeEmpty" class="notice-empty" hidden>아직 등록된 공지사항이 없습니다.</p>
+      <div id="noticeList" class="notice-list"></div>
     </section>
   </main>
 
