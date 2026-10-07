@@ -5,9 +5,6 @@ const postForm = document.querySelector('#postForm');
 const previewList = document.querySelector('#previewList');
 const formMessage = document.querySelector('#formMessage');
 const submitButton = document.querySelector('#submitButton');
-const loginPanel = document.querySelector('#loginPanel');
-const loginForm = document.querySelector('#loginForm');
-const loginMessage = document.querySelector('#loginMessage');
 const dialog = document.querySelector('#mediaDialog');
 const dialogMedia = document.querySelector('#dialogMedia');
 const dialogCaption = document.querySelector('#dialogCaption');
@@ -30,73 +27,66 @@ let activeFilter = '전체';
 const composerUploads = [];
 const savedEditorRanges = new WeakMap();
 const editorToolbars = new WeakMap();
+const lockedSelections = new WeakSet();
 let activeRichEditor = null;
 let dialogPost = null;
 let dialogIndex = 0;
-let isAdmin = false;
+let isAuthenticated = false;
 let selectedTrashIds = new Set();
 let detailLoadSequence = 0;
-if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
-if (location.hash) history.replaceState(history.state, '', `${location.pathname}${location.search}`);
-requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'instant' }));
-
-loadPosts();
-refreshAdminStatus();
-
-async function refreshAdminStatus() {
-  try {
-    const response = await fetch('/api/admin/status');
-    const status = await response.json();
-    isAdmin = status.authenticated;
-    loginPanel.hidden = status.authenticated;
-    postForm.hidden = !status.authenticated;
-    document.querySelector('#trashNav').hidden = !status.authenticated;
-    renderPosts();
-    syncPageFromHash();
-    if (!status.configured) {
-      document.querySelector('#loginDescription').textContent = '서버 환경 변수 PORTFOLIO_ADMIN_PASSWORD와 ADMIN_SESSION_SECRET 설정이 필요합니다.';
-      loginForm.hidden = true;
-    }
-  } catch {
-    isAdmin = false;
-    loginPanel.hidden = false;
-    document.querySelector('#loginDescription').textContent = '관리자 로그인 상태를 확인하지 못했습니다. 페이지를 새로고침해 주세요.';
-    loginForm.hidden = true;
-  }
+if ('scrollRestoration' in history) history.scrollRestoration = 'auto';
+let authEpoch = 0;
+let identity = null;
+const apiFetch = async (...args) => {
+  const epoch = authEpoch;
+  const response = await window.portfolioAuth.fetch(...args);
+  response.portfolioEpoch = epoch;
+  return response;
+};
+const privateMediaUrl = value => window.portfolioAuth.mediaUrl(value);
+function hydratePrivateMedia(root) {
+  root.querySelectorAll('img[src], video[src], a[href]').forEach(node => {
+    const attr = node.tagName === 'A' ? 'href' : 'src';
+    const value = node.getAttribute(attr);
+    if (/^\/api\/media\//.test(value)) node.setAttribute(attr, privateMediaUrl(value));
+  });
 }
-
-loginForm.addEventListener('submit', async event => {
-  event.preventDefault();
-  const loginButton = document.querySelector('#loginButton');
-  loginButton.disabled = true;
-  loginMessage.hidden = true;
-  try {
-    const response = await fetch('/api/admin/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: document.querySelector('#adminPassword').value })
-    });
-    const data = await readApiResponse(response);
-    loginForm.reset();
-    await refreshAdminStatus();
-  } catch (error) {
-    loginMessage.textContent = error.message;
-    loginMessage.classList.add('error');
-    loginMessage.hidden = false;
-  } finally {
-    loginButton.disabled = false;
-  }
-});
-
-document.querySelector('#logoutButton').addEventListener('click', async () => {
-  await fetch('/api/admin/logout', { method: 'POST' });
-  await refreshAdminStatus();
-});
+function canonicalBody(root) {
+  const copy = root.cloneNode(true);
+  copy.querySelectorAll('[src], [href]').forEach(node => {
+    const attr = node.hasAttribute('src') ? 'src' : 'href';
+    const value = node.getAttribute(attr);
+    if (/^\/api\/media\//.test(value)) node.setAttribute(attr, value.split('?')[0]);
+  });
+  return copy.innerHTML;
+}
+function applyAuthState(user) {
+  const next = user ? user.kind + ':' + user.username : null;
+  if (next === identity) return;
+  identity = next; authEpoch++; detailLoadSequence++;
+  isAuthenticated = !!user;
+  postForm.hidden = !user;
+  posts = []; selectedTrashIds.clear();
+  postGrid.replaceChildren(); detailView.replaceChildren(); trashList.replaceChildren();
+  postForm.reset(); editor.replaceChildren(); savedEditorRanges.delete(editor);
+  composerUploads.forEach(item => { if(item.previewUrl) URL.revokeObjectURL(item.previewUrl); });
+  composerUploads.length = 0; previewList.replaceChildren();
+  if (dialog.open) dialog.close();
+  const videoLinkDialog = document.querySelector('#videoLinkDialog');
+  if (videoLinkDialog.open) videoLinkDialog.close('cancel');
+  document.querySelector('#trashNav').hidden = !user;
+  if (user) loadPosts();
+}
+document.addEventListener('portfolio:auth', event => applyAuthState(event.detail.user));
+window.portfolioAuth.ready.then(() => applyAuthState(window.portfolioAuth.user));
 
 async function loadPosts() {
+  if (!isAuthenticated) return;
+  const epoch = authEpoch;
   try {
-    const response = await fetch('/api/posts');
+    const response = await apiFetch('/api/posts');
     const data = await readApiResponse(response);
+    if (epoch !== authEpoch) return;
     posts = data.posts || [];
     document.querySelector('#loadError').hidden = true;
     renderPosts();
@@ -140,14 +130,47 @@ function createPostCard(post, index) {
 
   const media = document.createElement('div');
   media.className = 'post-media';
-  if (post.media?.length) {
+  const externalVideo = findExternalVideo(post.bodyHtml);
+  if (externalVideo) {
+    media.classList.add('external-video-cover');
+    const cover = document.createElement('button');
+    cover.type = 'button'; cover.className = 'external-cover-button';
+    cover.setAttribute('aria-label', post.title + ' 외부 영상 재생');
+    const uploadedCover = (post.media || []).find(item => item.type === 'image');
+    const youtubeId = externalVideo.embed?.match(/youtube-nocookie\.com\/embed\/([\w-]{11})/)?.[1];
+    if (uploadedCover || youtubeId) {
+      const image = document.createElement('img');
+      image.src = uploadedCover ? privateMediaUrl(uploadedCover.url) : 'https://i.ytimg.com/vi/' + youtubeId + '/hqdefault.jpg';
+      image.alt = ''; image.loading = 'lazy'; image.referrerPolicy = 'no-referrer'; cover.append(image);
+    }
+    const label = document.createElement('span'); label.className = 'external-cover-label'; label.textContent = '▶ 영상 재생'; cover.append(label);
+    cover.addEventListener('click', () => {
+      const player = document.createElement(externalVideo.embed ? 'iframe' : 'video');
+      if (externalVideo.embed) {
+        const url = new URL(externalVideo.embed); url.searchParams.set('autoplay', '1'); url.searchParams.set('playsinline', '1');
+        player.src = url.href; player.title = post.title + ' 외부 영상'; player.allow = 'autoplay; fullscreen; picture-in-picture'; player.allowFullscreen = true; player.referrerPolicy = 'strict-origin-when-cross-origin';
+      } else {
+        player.src = externalVideo.url; player.controls = true; player.playsInline = true;
+        player.autoplay = true;
+      }
+      // Only one archive preview plays at a time.
+      postGrid.querySelectorAll('.external-video-cover iframe, .external-video-cover video').forEach(node => {
+        if (node.tagName === 'VIDEO') node.pause();
+        const original = node.parentElement._videoCover;
+        if (original) node.replaceWith(original);
+      });
+      media._videoCover = cover; media.replaceChildren(player);
+      if (player.tagName === 'VIDEO') player.play().catch(() => {});
+    });
+    media.append(cover);
+  } else if (post.media?.length) {
     post.media.slice(0, 4).forEach((item, mediaIndex) => {
       const tile = item.type === 'file' ? document.createElement('a') : document.createElement('button');
       if (item.type !== 'file') tile.type = 'button';
       tile.className = `media-tile media-count-${Math.min(post.media.length, 4)}`;
       if (item.type === 'file') {
         tile.classList.add('file-media-tile');
-        tile.href = item.url;
+        tile.href = privateMediaUrl(item.url);
         tile.setAttribute('aria-label', `${item.name || '첨부 파일'} 다운로드`);
         const icon = document.createElement('span'); icon.className = 'file-media-icon'; icon.textContent = '↓';
         const name = document.createElement('span'); name.className = 'file-media-name'; name.textContent = item.name || '첨부 파일';
@@ -155,7 +178,7 @@ function createPostCard(post, index) {
       } else if (item.type === 'video') {
         tile.setAttribute('aria-label', `${post.title} 동영상 ${mediaIndex + 1} 보기`);
         const video = document.createElement('video');
-        video.src = item.url;
+        video.src = privateMediaUrl(item.url);
         video.preload = 'metadata';
         video.muted = true;
         video.playsInline = true;
@@ -167,7 +190,7 @@ function createPostCard(post, index) {
       } else {
         tile.setAttribute('aria-label', `${post.title} 사진 ${mediaIndex + 1} 보기`);
         const image = document.createElement('img');
-        image.src = item.url;
+        image.src = privateMediaUrl(item.url);
         image.alt = item.name || post.title;
         image.loading = 'lazy';
         tile.append(image);
@@ -216,7 +239,10 @@ function createPostCard(post, index) {
   if (post.description) {
     const description = document.createElement('p');
     description.className = 'post-description';
-    description.textContent = post.description;
+    const bodyLink = document.createElement('a');
+    bodyLink.href = '#post/' + post._id;
+    bodyLink.textContent = post.description.length > 240 ? post.description.slice(0, 240) + '…' : post.description;
+    description.append(bodyLink);
     info.append(description);
   }
   if (post.media?.length) {
@@ -225,7 +251,7 @@ function createPostCard(post, index) {
     attachmentCount.textContent = `${String(post.media.length).padStart(2, '0')} ATTACHMENTS`;
     info.append(attachmentCount);
   }
-  if (isAdmin) {
+  if (isAuthenticated) {
     const deleteButton = document.createElement('button');
     deleteButton.type = 'button';
     deleteButton.className = 'delete-post-button';
@@ -246,7 +272,7 @@ async function deletePost(post, button) {
   const archiveMessage = document.querySelector('#archiveMessage');
   archiveMessage.hidden = true;
   try {
-    const response = await fetch(`/api/posts/${encodeURIComponent(post._id)}`, { method: 'DELETE' });
+    const response = await apiFetch(`/api/posts/${encodeURIComponent(post._id)}`, { method: 'DELETE' });
     await readApiResponse(response);
     posts = posts.filter(item => item._id !== post._id);
     renderPosts();
@@ -283,7 +309,7 @@ function renderDialogMedia() {
   if (!item) return;
   dialogMedia.replaceChildren();
   const media = item.type === 'video' ? document.createElement('video') : document.createElement('img');
-  media.src = item.url;
+  media.src = privateMediaUrl(item.url);
   if (item.type === 'video') {
     media.controls = true;
     media.autoplay = true;
@@ -325,7 +351,7 @@ document.querySelector('#searchInput').addEventListener('input', renderPosts);
 
 document.addEventListener('selectionchange', () => {
   const selection = window.getSelection();
-  if (activeRichEditor && selection?.rangeCount && activeRichEditor.contains(selection.anchorNode)) {
+  if (activeRichEditor && !lockedSelections.has(activeRichEditor) && selection?.rangeCount && activeRichEditor.contains(selection.anchorNode)) {
     savedEditorRanges.set(activeRichEditor, selection.getRangeAt(0).cloneRange());
     syncEditorToolbar(activeRichEditor);
   }
@@ -342,6 +368,8 @@ function syncEditorToolbar(target) {
   const size = toolbar.querySelector('[data-font-size]');
   const weight = toolbar.querySelector('[data-font-weight]');
   const family = toolbar.querySelector('[data-font-family]');
+  const status = toolbar.querySelector('.editor-selection-status');
+  if (status) status.textContent = range.collapsed ? '본문에서 글자를 선택한 뒤 서식을 바꿔주세요.' : '선택한 글자에 서식을 적용합니다.';
   if (size) size.value = String(Math.round(Number.parseFloat(style.fontSize)) || 16);
   if (weight) {
     const computedWeight = Number.parseInt(style.fontWeight, 10) || 400;
@@ -355,34 +383,54 @@ function syncEditorToolbar(target) {
   }
 }
 
-function restoreEditorSelection(target) {
+function restoreEditorSelection(target, focus = true) {
   const range = savedEditorRanges.get(target);
   if (!range || !target.contains(range.commonAncestorContainer)) return null;
-  target.focus();
+  if (focus) target.focus({ preventScroll: true });
   const selection = window.getSelection();
   selection.removeAllRanges();
   selection.addRange(range);
   return range;
 }
 
-function styleSelection(target, property, value) {
-  const range = restoreEditorSelection(target);
+function styleSelection(target, property, value, keepControlFocus = false) {
+  const retainControl = keepControlFocus;
+  const range = retainControl ? savedEditorRanges.get(target)?.cloneRange() : restoreEditorSelection(target);
   if (!range || range.collapsed) return;
   const span = document.createElement('span');
   span.style[property] = value;
   span.append(range.extractContents());
   range.insertNode(span);
   const selection = window.getSelection();
-  selection.removeAllRanges();
   const selected = document.createRange();
   selected.selectNodeContents(span);
-  selection.addRange(selected);
+  if (!retainControl) {
+    selection.removeAllRanges();
+    selection.addRange(selected);
+  }
   savedEditorRanges.set(target, selected.cloneRange());
 }
 
 function wireEditorToolbar(toolbar, target, queue, queueChanged, existingMediaCount = 0) {
   editorToolbars.set(target, toolbar);
-  target.addEventListener('focusin', () => { activeRichEditor = target; });
+  target.addEventListener('focusin', () => { activeRichEditor = target; lockedSelections.delete(target); });
+  toolbar.addEventListener('pointerdown', event => {
+    const selection = window.getSelection();
+    if (selection?.rangeCount && target.contains(selection.anchorNode)) savedEditorRanges.set(target, selection.getRangeAt(0).cloneRange());
+    lockedSelections.add(target);
+    if (event.target.closest('button')) event.preventDefault();
+  });
+  toolbar.addEventListener('focusout', event => {
+    if (!toolbar.contains(event.relatedTarget)) lockedSelections.delete(target);
+  });
+  target.addEventListener('pointerdown', () => lockedSelections.delete(target));
+  toolbar.querySelector('[data-font-size-preset]')?.addEventListener('change', event => {
+    const size = event.currentTarget.value;
+    if (!size) return;
+    toolbar.querySelector('[data-font-size]').value = size;
+    styleSelection(target, 'fontSize', size + 'px');
+    event.currentTarget.value = '';
+  });
   toolbar.addEventListener('mousedown', event => {
     if (event.target.closest('button')) event.preventDefault();
   });
@@ -409,7 +457,7 @@ function wireEditorToolbar(toolbar, target, queue, queueChanged, existingMediaCo
     const parsed = Number.parseInt(input.value, 10);
     if (!Number.isFinite(parsed) || parsed < 12 || parsed > 48) return;
     const size = parsed;
-    styleSelection(target, 'fontSize', `${size}px`);
+    styleSelection(target, 'fontSize', `${size}px`, true);
     input.dataset.appliedSize = String(size);
   });
   sizeInput?.addEventListener('change', event => {
@@ -417,17 +465,26 @@ function wireEditorToolbar(toolbar, target, queue, queueChanged, existingMediaCo
     const parsed = Number.parseInt(input.value, 10);
     const size = Math.min(48, Math.max(12, Number.isFinite(parsed) ? parsed : 16));
     input.value = String(size);
-    if (input.dataset.appliedSize !== String(size)) styleSelection(target, 'fontSize', `${size}px`);
+    if (input.dataset.appliedSize !== String(size)) styleSelection(target, 'fontSize', `${size}px`, true);
     delete input.dataset.appliedSize;
   });
-  toolbar.querySelector('[data-font-color]')?.addEventListener('input', event => styleSelection(target, 'color', event.currentTarget.value));
+  sizeInput?.addEventListener('blur', event => {
+    if (!toolbar.contains(event.relatedTarget)) {
+      const range = savedEditorRanges.get(target);
+      if (range && !range.collapsed && target.contains(range.commonAncestorContainer)) {
+        const selection = window.getSelection();
+        selection.removeAllRanges(); selection.addRange(range.cloneRange());
+      }
+    }
+  });
+  toolbar.querySelector('[data-font-color]')?.addEventListener('input', event => styleSelection(target, 'color', event.currentTarget.value, true));
   toolbar.querySelectorAll('[data-font-step]').forEach(button => button.addEventListener('click', () => {
     const input = toolbar.querySelector('[data-font-size]');
     const size = Math.min(48, Math.max(12, (Number.parseInt(input.value, 10) || 16) + Number(button.dataset.fontStep)));
     input.value = String(size); styleSelection(target, 'fontSize', `${size}px`); input.dataset.appliedSize = String(size);
   }));
-  toolbar.querySelector('[data-add-video-link]')?.addEventListener('click', () => {
-    const value = window.prompt('YouTube, Vimeo 또는 외부 동영상 링크를 붙여 넣으세요.'); if (!value) return;
+  toolbar.querySelector('[data-add-video-link]')?.addEventListener('click', async () => {
+    const value = await askVideoLink(); if (!value || !isAuthenticated || !document.contains(target)) return;
     let url; try { url = new URL(value.trim()); } catch { window.alert('올바른 동영상 주소를 입력해주세요.'); return; }
     if (url.protocol !== 'https:') { window.alert('보안을 위해 https 주소만 첨부할 수 있어요.'); return; }
     const range = restoreEditorSelection(target); if (!range) { window.alert('링크를 넣을 본문 위치를 먼저 눌러주세요.'); return; }
@@ -566,7 +623,8 @@ window.addEventListener('hashchange', syncPageFromHash);
 syncPageFromHash();
 
 function syncPageFromHash() {
-  const hash = decodeURIComponent(location.hash.slice(1));
+  if (!isAuthenticated) return;
+  let hash; try { hash = decodeURIComponent(location.hash.slice(1)); } catch { hash = ''; }
   const isDetail = hash.startsWith('post/');
   const isTrash = hash === 'trash';
   const isComposer = hash === 'write';
@@ -591,6 +649,27 @@ function externalVideoEmbedUrl(value) {
   if (host === 'vimeo.com' || host === 'player.vimeo.com') { const videoId = url.pathname.match(/\/(?:video\/)?(\d+)/)?.[1]; return videoId ? `https://player.vimeo.com/video/${videoId}` : null; }
   return null;
 }
+function findExternalVideo(html) {
+  const template = document.createElement('template'); template.innerHTML = html || '';
+  for (const link of template.content.querySelectorAll('a[href]')) {
+    const value = link.getAttribute('href');
+    const embed = externalVideoEmbedUrl(value);
+    if (embed) return { url: value, embed };
+    try {
+      const url = new URL(value);
+      if (url.protocol === 'https:' && /\.(mp4|webm|mov)$/i.test(url.pathname)) return { url: url.href, embed: null };
+    } catch {}
+  }
+  return null;
+}
+function askVideoLink() {
+  const modal = document.querySelector('#videoLinkDialog');
+  const input = modal.querySelector('input'); input.value = '';
+  return new Promise(resolve => {
+    modal.addEventListener('close', () => resolve(modal.returnValue === 'insert' ? input.value.trim() : null), { once: true });
+    modal.returnValue = ''; modal.showModal(); input.focus();
+  });
+}
 function renderExternalVideoLinks(article) {
   article.querySelectorAll('a[href]').forEach(link => {
     const src = externalVideoEmbedUrl(link.href); if (!src) return;
@@ -614,7 +693,7 @@ async function loadPostDetail(id) {
   try {
     let post = cached;
     if (!post) {
-      const response = await fetch(`/api/posts/${encodeURIComponent(id)}`);
+      const response = await apiFetch(`/api/posts/${encodeURIComponent(id)}`);
       const data = await readApiResponse(response);
       post = data.post;
     }
@@ -632,16 +711,17 @@ async function loadPostDetail(id) {
     const article = document.createElement('article'); article.className = 'blog-article';
     if (post.bodyHtml) article.innerHTML = post.bodyHtml;
     else if (post.description) { const paragraph = document.createElement('p'); paragraph.textContent = post.description; article.append(paragraph); }
+    hydratePrivateMedia(article);
     renderExternalVideoLinks(article);
     const media = document.createElement('div'); media.className = 'detail-media-list';
     const bodyTemplate = document.createElement('template'); bodyTemplate.innerHTML = post.bodyHtml || '';
     const embeddedUrls = new Set(Array.from(bodyTemplate.content.querySelectorAll('img[src],video[src],a[href]'), node => node.getAttribute('src') || node.getAttribute('href')));
     (post.media || []).filter(item => !embeddedUrls.has(item.url)).forEach(item => {
       if (item.type === 'file') {
-        const link = document.createElement('a'); link.className = 'detail-file-link'; link.href = item.url; link.textContent = `↓ ${item.name || '첨부 파일 다운로드'}`; media.append(link); return;
+        const link = document.createElement('a'); link.className = 'detail-file-link'; link.href = privateMediaUrl(item.url); link.textContent = `↓ ${item.name || '첨부 파일 다운로드'}`; media.append(link); return;
       }
       const node = item.type === 'video' ? document.createElement('video') : document.createElement('img');
-      node.src = item.url;
+      node.src = privateMediaUrl(item.url);
       if (item.type === 'video') { node.controls = true; node.playsInline = true; }
       else { node.alt = item.name || post.title; node.loading = 'lazy'; }
       media.append(node);
@@ -649,7 +729,7 @@ async function loadPostDetail(id) {
     detailView.append(back, meta, title);
     if (media.childElementCount) detailView.append(media);
     detailView.append(article);
-    if (isAdmin) {
+    if (isAuthenticated) {
       const actions = document.createElement('div'); actions.className = 'detail-actions';
       const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'edit-post-button'; edit.textContent = '게시물 수정';
       edit.addEventListener('click', () => beginInlinePostEdit(post, { title, category, categoryEditor, article }));
@@ -658,7 +738,7 @@ async function loadPostDetail(id) {
       remove.addEventListener('click', async () => {
         if (!window.confirm(`“${post.title}” 게시물을 휴지통으로 이동할까요? 30일 안에 복원할 수 있습니다.`)) return;
         try {
-          const response = await fetch(`/api/posts/${encodeURIComponent(post._id)}`, { method: 'DELETE' });
+          const response = await apiFetch(`/api/posts/${encodeURIComponent(post._id)}`, { method: 'DELETE' });
           await readApiResponse(response);
           location.hash = 'work'; loadPosts();
         } catch (error) { window.alert(error.message || '게시물을 이동하지 못했습니다.'); }
@@ -675,7 +755,7 @@ async function loadPostDetail(id) {
 }
 
 function beginInlinePostEdit(post, elements) {
-  if (!isAdmin) return;
+  if (!isAuthenticated) return;
   const queue = [];
   const toolbar = document.querySelector('#composerToolbar').cloneNode(true);
   toolbar.removeAttribute('id'); toolbar.classList.add('detail-editor-toolbar');
@@ -710,12 +790,12 @@ async function saveInlinePostEdit(post, elements, queue, saveButton, cancelButto
   if (!title) { message.textContent = '게시물 제목을 입력해주세요.'; message.hidden = false; return; }
   if (bodyText.length > 25000 || elements.article.innerHTML.length > 150000) { message.textContent = '본문은 최대 25,000자까지 작성할 수 있어요.'; message.hidden = false; return; }
   const form = new FormData();
-  form.set('title', title); form.set('category', elements.categoryEditor.value); form.set('bodyHtml', elements.article.innerHTML);
+  form.set('title', title); form.set('category', elements.categoryEditor.value); form.set('bodyHtml', canonicalBody(elements.article));
   form.set('inlineMedia', JSON.stringify(queue.map(item => ({ token: item.token }))));
   queue.forEach(item => form.append('media', item.file));
   saveButton.disabled = true; cancelButton.disabled = true; saveButton.textContent = '저장 중…'; message.hidden = true;
   try {
-    const response = await fetch(`/api/posts/${encodeURIComponent(post._id)}`, { method: 'PUT', body: form });
+    const response = await apiFetch(`/api/posts/${encodeURIComponent(post._id)}`, { method: 'PUT', body: form });
     const data = await readApiResponse(response);
     if (!response.ok || !data.success) throw new Error(data.message || '게시물을 수정하지 못했습니다.');
     const index = posts.findIndex(item => item._id === data.post._id);
@@ -730,6 +810,7 @@ async function saveInlinePostEdit(post, elements, queue, saveButton, cancelButto
 }
 
 async function loadTrash() {
+  const epoch = authEpoch;
   trashList.replaceChildren();
   selectedTrashIds = new Set();
   selectAllTrash.checked = false;
@@ -737,13 +818,14 @@ async function loadTrash() {
   trashBulkActions.hidden = true;
   updateTrashSelection(0);
   document.querySelector('#trashEmpty').hidden = true;
-  if (!isAdmin) {
+  if (!isAuthenticated) {
     trashList.textContent = '휴지통은 관리자 로그인 후 확인할 수 있습니다.';
     return;
   }
   try {
-    const response = await fetch('/api/trash');
+    const response = await apiFetch('/api/trash');
     const data = await readApiResponse(response);
+    if (epoch !== authEpoch) return;
     trashBulkActions.hidden = data.posts.length === 0;
     data.posts.forEach(post => {
       const row = document.createElement('article'); row.className = 'trash-row';
@@ -803,7 +885,7 @@ async function restoreSelectedPosts() {
   try {
     let restored = 0;
     for (let index = 0; index < ids.length; index += 100) {
-      const response = await fetch('/api/trash/restore', {
+      const response = await apiFetch('/api/trash/restore', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: ids.slice(index, index + 100) })
       });
       const data = await readApiResponse(response);
@@ -821,7 +903,7 @@ async function restoreSelectedPosts() {
 
 async function restorePost(post) {
   try {
-    const response = await fetch(`/api/trash/${encodeURIComponent(post._id)}/restore`, { method: 'POST' });
+    const response = await apiFetch(`/api/trash/${encodeURIComponent(post._id)}/restore`, { method: 'POST' });
     await readApiResponse(response);
     document.querySelector('#trashMessage').textContent = '게시물을 복원했습니다.';
     document.querySelector('#trashMessage').hidden = false;
@@ -832,7 +914,7 @@ async function restorePost(post) {
 async function permanentlyDeletePost(post) {
   if (!window.confirm(`“${post.title}” 게시물과 첨부 파일을 완전히 삭제할까요? 복구할 수 없습니다.`)) return;
   try {
-    const response = await fetch(`/api/trash/${encodeURIComponent(post._id)}`, { method: 'DELETE' });
+    const response = await apiFetch(`/api/trash/${encodeURIComponent(post._id)}`, { method: 'DELETE' });
     await readApiResponse(response);
     await loadTrash();
   } catch (error) { window.alert(error.message || '완전히 삭제하지 못했습니다.'); }
@@ -854,14 +936,14 @@ postForm.addEventListener('submit', async event => {
   const payload = new FormData();
   payload.set('title', document.querySelector('#titleInput').value.trim());
   payload.set('category', document.querySelector('#categoryInput').value);
-  payload.set('bodyHtml', editor.innerHTML);
+  payload.set('bodyHtml', canonicalBody(editor));
   payload.set('inlineMedia', JSON.stringify(composerUploads.map(item => ({ token: item.token }))));
   composerUploads.forEach(item => payload.append('media', item.file));
   submitButton.disabled = true;
   document.querySelector('#submitButtonLabel').textContent = '게시물을 저장하고 있어요…';
   clearFormMessage();
   try {
-    const response = await fetch('/api/posts', { method: 'POST', body: payload });
+    const response = await apiFetch('/api/posts', { method: 'POST', body: payload });
     const data = await readApiResponse(response);
     if (!response.ok || !data.success) throw new Error(data.message || '게시물을 저장하지 못했습니다.');
     posts.unshift(data.post);
@@ -895,6 +977,8 @@ async function readApiResponse(response) {
   let data;
   try { data = JSON.parse(text); }
   catch { throw new Error(text.trim().slice(0, 240) || `서버 응답을 읽지 못했습니다. (HTTP ${response.status})`); }
+  if (response.portfolioEpoch !== undefined && response.portfolioEpoch !== authEpoch) throw new Error('로그인 계정이 변경되어 요청을 중단했습니다.');
+  if (response.status === 401) window.portfolioAuth.expire();
   if (!response.ok || data.success === false) {
     const error = new Error(data.message || `요청을 처리하지 못했습니다. (HTTP ${response.status})`);
     error.status = response.status;
@@ -907,4 +991,5 @@ function clearFormMessage() { formMessage.hidden = true; formMessage.textContent
 document.querySelector('#closeDialog').addEventListener('click', () => dialog.close());
 dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
 dialog.addEventListener('close', () => { dialogMedia.replaceChildren(); dialogPost = null; });
+
 

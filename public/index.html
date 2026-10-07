@@ -14,12 +14,13 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@300;400;500;600;700;800;900&family=Noto+Serif+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
   <link rel="stylesheet" href="/css/brand.css">
-  <script src="/js/main.js" defer></script>
+  <script src="/js/auth-ui.js?v=1" defer></script>
+  <script src="/js/main.js?v=private1" defer></script>
 </head>
 <body>
   <header class="topbar">
     <a class="wordmark" href="#top" aria-label="작업 아카이브 홈"><img class="brand-logo" src="/assets/site-logo.svg?v=3" alt="ARCHIVE · Portfolio for My Dream"></a>
-    <nav class="top-nav" aria-label="주요 메뉴">
+    <nav data-private hidden class="top-nav" aria-label="주요 메뉴">
       <a href="#work">작업물</a>
       <a href="#about">소개</a>
       <a id="trashNav" href="#trash" hidden>휴지통</a>
@@ -31,10 +32,48 @@
         </div>
       </details>
     </nav>
-    <a class="nav-cta" href="#write">게시글 등록하기 <span aria-hidden="true">↗</span></a>
+    <a data-private hidden class="nav-cta" href="#write">게시글 등록하기 <span aria-hidden="true">↗</span></a>
+    <div data-private hidden class="account-actions"><span id="accountBadge"></span><button data-logout type="button">로그아웃</button></div>
   </header>
 
-  <main id="top">
+  <section id="authScreen" class="auth-screen" aria-labelledby="authTitle">
+    <div class="auth-intro"><p class="eyebrow">YOUR PRIVATE CREATIVE SPACE</p><h1 id="authTitle">나의 작업만 담는<br><span>개인 아카이브.</span></h1><p>사진, 영상, 글로 작업의 과정을 기록하세요.<br>내 포트폴리오는 내 계정에서만 볼 수 있어요.</p><div class="auth-private-note">계정별로 게시물과 첨부 파일, 휴지통을 분리합니다.</div></div>
+    <div class="auth-card">
+      <div class="auth-tabs" aria-label="접속 방법">
+        <button type="button" data-auth-view-button="login" class="active" aria-pressed="true">로그인</button>
+        <button type="button" data-auth-view-button="register" aria-pressed="false">회원가입</button>
+        <button type="button" data-auth-view-button="admin" aria-pressed="false">관리자</button>
+      </div>
+      <p id="authNotice" class="auth-notice" role="status" hidden></p>
+      <form class="auth-form" id="loginForm" data-auth-view="login">
+        <h2>다시 만나 반가워요.</h2><p>나만의 작업 아카이브에 로그인하세요.</p>
+        <label for="loginUsername">아이디</label><input id="loginUsername" name="username" autocomplete="username" maxlength="30" required>
+        <label for="loginPassword">비밀번호</label><input id="loginPassword" name="password" type="password" autocomplete="current-password" maxlength="128" required>
+        <label class="remember-option"><input type="checkbox" name="remember"><span>로그인 유지</span></label>
+        <p class="auth-hint">선택하면 브라우저 사용 중 로그인을 유지합니다. 30분간 활동이 없으면 자동 로그아웃됩니다.</p>
+        <p class="auth-error" role="status" hidden></p><button type="submit" class="auth-submit">내 아카이브 열기 <span aria-hidden="true">↗</span></button>
+      </form>
+      <form class="auth-form" id="registerForm" data-auth-view="register" hidden>
+        <h2>새로운 기록을 시작해요.</h2><p>나만 사용할 아이디와 비밀번호를 만들어주세요.</p>
+        <label for="registerUsername">아이디</label><input id="registerUsername" name="username" autocomplete="username" minlength="3" maxlength="30" pattern="[A-Za-z0-9][A-Za-z0-9._-]{2,29}" aria-describedby="usernameHint" required>
+        <p id="usernameHint" class="auth-hint">영문·숫자 3~30자. ., _, -도 사용할 수 있어요.</p>
+        <label for="registerPassword">비밀번호</label><input id="registerPassword" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required>
+        <label for="registerPasswordConfirm">비밀번호 재확인</label><input id="registerPasswordConfirm" name="passwordConfirm" type="password" autocomplete="new-password" minlength="8" maxlength="128" required>
+        <p class="auth-hint">비밀번호는 8자 이상으로 설정해주세요.</p>
+        <p class="auth-error" role="status" hidden></p><button type="submit" class="auth-submit">계정 만들기 <span aria-hidden="true">↗</span></button>
+      </form>
+      <form class="auth-form" id="adminLoginForm" data-auth-view="admin" hidden>
+        <h2>관리자 아카이브</h2><p>기존 관리자 비밀번호로 접속하세요.<br>지금까지 등록한 게시물이 그대로 연결됩니다.</p>
+        <label for="ownerPassword">관리자 비밀번호</label><input id="ownerPassword" name="password" type="password" autocomplete="current-password" maxlength="128" required>
+        <label class="remember-option"><input type="checkbox" name="remember"><span>로그인 유지</span></label>
+        <p class="auth-hint">30분간 활동이 없으면 자동 로그아웃됩니다.</p>
+        <p class="auth-error" role="status" hidden></p><button type="submit" class="auth-submit">관리자 로그인 <span aria-hidden="true">↗</span></button>
+      </form>
+      <p class="auth-session-note">로그인 유지를 선택하지 않으면 탭을 닫고 새로 접속할 때 다시 로그인합니다.</p>
+    </div>
+  </section>
+
+  <main id="top" hidden>
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy">
         <p class="eyebrow"><span class="live-dot"></span> PERSONAL PORTFOLIO · WORKS & STORIES</p>
@@ -97,20 +136,8 @@
 
     <section class="composer-page page-view" id="write" hidden>
       <header class="composer-heading"><a href="#work" class="detail-back">← 내 작업 아카이브</a><p class="eyebrow">NEW ENTRY · CREATIVE ARCHIVE</p><h1>새 게시글 작성<span>.</span></h1><p>글을 쓰다가 원하는 위치에 사진·동영상·파일을 넣을 수 있어요.</p></header>
-      <section id="loginPanel" class="login-panel" aria-labelledby="loginTitle" hidden>
-        <div class="form-topline"><span>ARCHIVE ACCESS</span><span>ADMIN</span></div>
-        <span class="login-symbol" aria-hidden="true">✳</span>
-        <h3 id="loginTitle">작업 아카이브에<br>로그인해 주세요.</h3>
-        <p id="loginDescription">관리자만 새 작업을 등록할 수 있습니다.</p>
-        <form id="loginForm">
-          <label class="field-label" for="adminPassword">관리자 비밀번호</label>
-          <input id="adminPassword" name="password" type="password" autocomplete="current-password" placeholder="비밀번호 입력" required>
-          <p id="loginMessage" class="form-message" role="status" hidden></p>
-          <button id="loginButton" class="submit-button" type="submit"><span>로그인</span><span aria-hidden="true">↗</span></button>
-        </form>
-      </section>
       <form id="postForm" class="post-form composer-form" hidden>
-        <div class="form-topline"><span id="writeModeLabel">NEW PROJECT ENTRY</span><button id="logoutButton" class="logout-button" type="button">로그아웃 ↗</button></div>
+        <div class="form-topline"><span id="writeModeLabel">NEW PROJECT ENTRY</span><button id="logoutButton" data-logout class="logout-button" type="button">로그아웃 ↗</button></div>
         <label class="field-label" for="titleInput">작업 제목 <span>*</span></label>
         <input id="titleInput" name="title" maxlength="120" placeholder="작업의 이름을 적어주세요" required>
         <div class="form-row">
@@ -119,9 +146,12 @@
         </div>
         <label class="field-label" for="editor">본문 <span class="optional">선택 · 최대 25,000자</span></label>
         <div id="composerToolbar" class="editor-toolbar" role="toolbar" aria-label="본문 서식 및 파일 첨부">
-          <label class="editor-control font-family-control"><span class="sr-only">글씨체</span><select data-font-family aria-label="글씨체"><option value="Noto Sans KR">고딕 · Noto Sans</option><option value="Noto Serif KR">명조 · Noto Serif</option><option value="Georgia">Georgia</option><option value="Arial">Arial</option><option value="Verdana">Verdana</option><option value="Tahoma">Tahoma</option><option value="Trebuchet MS">Trebuchet MS</option><option value="Courier New">Courier New</option><option value="serif">기본 명조</option><option value="sans-serif">기본 고딕</option><option value="monospace">기본 고정폭</option></select></label>
-          <label class="editor-control weight-control"><span class="sr-only">글씨 굵기</span><select data-font-weight aria-label="글씨 굵기"><option value="300">가는 글씨</option><option value="400" selected>보통</option><option value="500">중간</option><option value="600">약간 굵게</option><option value="700">볼드</option><option value="800">아주 굵게</option><option value="900">가장 굵게</option></select></label>
-          <label class="editor-control editor-size-control"><span class="sr-only">글씨 크기</span><button class="font-size-step" type="button" data-font-step="-1" aria-label="글씨 크기 1px 줄이기">−</button><input data-font-size type="number" min="12" max="48" step="1" value="16" inputmode="numeric" aria-label="글씨 크기 (12–48px)" title="글씨 크기를 12~48px 사이 숫자로 입력"><button class="font-size-step" type="button" data-font-step="1" aria-label="글씨 크기 1px 키우기">+</button><span aria-hidden="true">px</span></label>
+          <div class="editor-toolbar-group typography-group" role="group" aria-label="글씨체와 크기">
+          <label class="editor-control font-family-control"><span class="editor-control-label">글씨체</span><select data-font-family aria-label="글씨체"><option value="Noto Sans KR">고딕 · Noto Sans</option><option value="Noto Serif KR">명조 · Noto Serif</option><option value="Georgia">Georgia</option><option value="Arial">Arial</option><option value="Verdana">Verdana</option><option value="Tahoma">Tahoma</option><option value="Trebuchet MS">Trebuchet MS</option><option value="Courier New">Courier New</option><option value="serif">기본 명조</option><option value="sans-serif">기본 고딕</option><option value="monospace">기본 고정폭</option></select></label>
+          <label class="editor-control weight-control"><span class="editor-control-label">굵기</span><select data-font-weight aria-label="글씨 굵기"><option value="300">가는 글씨</option><option value="400" selected>보통</option><option value="500">중간</option><option value="600">약간 굵게</option><option value="700">볼드</option><option value="800">아주 굵게</option><option value="900">가장 굵게</option></select></label>
+          <label class="editor-control editor-size-control"><span class="sr-only">글씨 크기</span><button class="font-size-step" type="button" data-font-step="-1" aria-label="글씨 크기 1px 줄이기">−</button><input data-font-size type="number" min="12" max="48" step="1" value="16" inputmode="numeric" aria-label="글씨 크기 (12–48px)" title="글씨 크기를 12~48px 사이 숫자로 입력"><button class="font-size-step" type="button" data-font-step="1" aria-label="글씨 크기 1px 키우기">+</button><span aria-hidden="true">px</span></label><select data-font-size-preset aria-label="추천 글씨 크기"><option value="">크기 선택</option><option value="14">14px</option><option value="16">16px</option><option value="18">18px</option><option value="20">20px</option><option value="24">24px</option><option value="28">28px</option><option value="32">32px</option><option value="40">40px</option><option value="48">48px</option></select>
+          </div>
+          <div class="editor-toolbar-group format-group" role="group" aria-label="문단과 서식">
           <button type="button" class="editor-button" data-command="bold" aria-label="굵게"><strong>B</strong></button>
           <button type="button" class="editor-button" data-command="italic" aria-label="기울임"><em>I</em></button>
           <button type="button" class="editor-button" data-command="underline" aria-label="밑줄"><u>U</u></button>
@@ -133,6 +163,8 @@
           <button type="button" class="editor-button" data-block="h2" aria-label="소제목">H</button>
           <button type="button" class="editor-button" data-command="insertUnorderedList" aria-label="글머리 기호">• 목록</button>
           <span class="editor-separator" aria-hidden="true"></span>
+          </div>
+          <div class="editor-toolbar-group attachment-group" role="group" aria-label="파일과 링크 첨부">
           <button type="button" class="inline-insert-button" data-open-picker="image">사진 넣기</button>
           <button type="button" class="inline-insert-button" data-open-picker="video">동영상 넣기</button>
           <button type="button" class="inline-insert-button" data-open-picker="file">파일 넣기</button>
@@ -140,6 +172,8 @@
           <input data-file-input="image" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple hidden>
           <input data-file-input="video" type="file" accept="video/mp4,video/webm,video/quicktime" multiple hidden>
           <input data-file-input="file" type="file" multiple hidden>
+          </div>
+          <span class="editor-selection-status" aria-live="polite">글자를 선택한 뒤 서식을 조절하세요.</span>
         </div>
         <p class="editor-hint">본문에서 넣을 위치를 클릭한 다음 첨부 버튼을 누르세요. 글씨체·굵기·크기를 직접 조절하고 YouTube/Vimeo 링크는 본문에서 바로 재생할 수 있어요. 외부 영상은 서버 저장 공간을 사용하지 않습니다.</p>
         <div id="editor" class="rich-editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="게시물 본문" data-placeholder="무엇을 만들었나요? 아이디어와 과정, 사용한 도구 등을 자유롭게 적어주세요."></div>
@@ -153,7 +187,7 @@
     </section>
   </main>
 
-  <footer class="footer"><a class="wordmark" href="#top" aria-label="작업 아카이브 홈"><img class="brand-logo" src="/assets/site-logo.svg?v=3" alt="ARCHIVE · Portfolio for My Dream"></a><span>MADE WITH CURIOSITY · © 2026</span><a href="#top">BACK TO TOP ↑</a></footer>
+  <footer data-private hidden class="footer"><a class="wordmark" href="#top" aria-label="작업 아카이브 홈"><img class="brand-logo" src="/assets/site-logo.svg?v=3" alt="ARCHIVE · Portfolio for My Dream"></a><span>MADE WITH CURIOSITY · © 2026</span><a href="#top">BACK TO TOP ↑</a></footer>
 
   <dialog id="mediaDialog" class="media-dialog" aria-label="미디어 미리보기">
     <button id="closeDialog" class="dialog-close" type="button" aria-label="닫기">×</button>
@@ -162,6 +196,16 @@
     <button id="nextMedia" class="dialog-nav dialog-next" type="button" aria-label="다음 미디어">→</button>
     <p id="dialogCaption"></p>
   </dialog>
+  <dialog id="videoLinkDialog" class="video-link-dialog" aria-labelledby="videoLinkTitle">
+    <form method="dialog">
+      <h2 id="videoLinkTitle">외부 영상 링크</h2>
+      <p>YouTube·Vimeo 또는 HTTPS 동영상 파일 주소를 넣어주세요.</p>
+      <label for="externalVideoUrl">영상 주소</label>
+      <input id="externalVideoUrl" type="url" placeholder="https://…" required>
+      <div class="video-link-actions"><button value="cancel" formnovalidate>취소</button><button value="insert" class="auth-submit">본문에 넣기</button></div>
+    </form>
+  </dialog>
 </body>
 </html>
+
 

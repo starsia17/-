@@ -9,14 +9,14 @@ const mongoose = require('mongoose');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const PortfolioPost = require('./models/PortfolioPost');
+const PortfolioUser = require('./models/PortfolioUser');
+const PortfolioSession = require('./models/PortfolioSession');
+const auth = require('./auth')(PortfolioUser, PortfolioSession, process.env.PORTFOLIO_ADMIN_PASSWORD || '');
 
 const app = express();
 const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGODB_URI;
-const ADMIN_PASSWORD = process.env.PORTFOLIO_ADMIN_PASSWORD || '';
-const ADMIN_SESSION_SECRET = process.env.ADMIN_SESSION_SECRET || '';
-const loginAttempts = new Map();
 const TEMP_UPLOAD_DIR = path.join(os.tmpdir(), 'creative-work-archive-uploads');
 const GRIDFS_BUCKET_NAME = 'portfolioMedia';
 const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -31,6 +31,16 @@ fs.mkdirSync(TEMP_UPLOAD_DIR, { recursive: true });
 app.set('trust proxy', true);
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/api', (req, res, next) => {
+  res.set('Cache-Control', 'private, no-store');
+  res.set('Vary', 'Cookie, X-Portfolio-Tab');
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.headers.origin) {
+    try {
+      if (new URL(req.headers.origin).host !== req.get('host')) return res.status(403).json({ success: false, message: '허용되지 않은 요청입니다.' });
+    } catch { return res.status(403).json({ success: false, message: '허용되지 않은 요청입니다.' }); }
+  }
+  next();
+});
 app.use('/api', async (req, res, next) => {
   if (Date.now() - lastTrashPurgeAt < 60 * 1000) return next();
   lastTrashPurgeAt = Date.now();
@@ -53,70 +63,12 @@ const upload = multer({
   fileFilter: (req, file, callback) => callback(null, true)
 });
 
-function adminSessionToken(expiresAt) {
-  const payload = Buffer.from(JSON.stringify({ expiresAt })).toString('base64url');
-  const signature = crypto.createHmac('sha256', ADMIN_SESSION_SECRET).update(payload).digest('base64url');
-  return `${payload}.${signature}`;
-}
+auth.mount(app);
+const requireUser = auth.requireUser;
 
-function isAdminRequest(req) {
-  if (!ADMIN_SESSION_SECRET) return false;
-  const cookie = (req.headers.cookie || '').split(';').map(value => value.trim())
-    .find(value => value.startsWith('portfolio_admin='));
-  if (!cookie) return false;
-  let token;
-  try { token = decodeURIComponent(cookie.slice('portfolio_admin='.length)); } catch { return false; }
-  const [payload, suppliedSignature] = token.split('.');
-  if (!payload || !suppliedSignature) return false;
-  const expectedSignature = crypto.createHmac('sha256', ADMIN_SESSION_SECRET).update(payload).digest();
-  let actualSignature;
-  try { actualSignature = Buffer.from(suppliedSignature, 'base64url'); } catch { return false; }
-  if (actualSignature.length !== expectedSignature.length || !crypto.timingSafeEqual(actualSignature, expectedSignature)) return false;
-  try { return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')).expiresAt > Date.now(); }
-  catch { return false; }
-}
-
-function requireAdmin(req, res, next) {
-  if (isAdminRequest(req)) return next();
-  res.status(401).json({ success: false, message: '게시물을 등록하려면 관리자 로그인이 필요합니다.' });
-}
-
-app.get('/api/admin/status', (req, res) => {
-  res.json({ configured: Boolean(ADMIN_PASSWORD && ADMIN_SESSION_SECRET), authenticated: isAdminRequest(req) });
-});
-
-app.post('/api/admin/login', (req, res) => {
-  if (!ADMIN_PASSWORD || !ADMIN_SESSION_SECRET) {
-    return res.status(503).json({ success: false, message: 'PORTFOLIO_ADMIN_PASSWORD와 ADMIN_SESSION_SECRET 환경 변수를 먼저 설정해주세요.' });
-  }
-  const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
-  const now = Date.now();
-  let attempts = loginAttempts.get(clientIp);
-  if (!attempts || attempts.resetAt <= now) attempts = { count: 0, resetAt: now + 15 * 60 * 1000 };
-  if (attempts.count >= 8) return res.status(429).json({ success: false, message: '로그인 시도가 많습니다. 15분 후 다시 시도해주세요.' });
-  const submitted = Buffer.from(String(req.body.password || ''));
-  const expected = Buffer.from(ADMIN_PASSWORD);
-  if (submitted.length !== expected.length || !crypto.timingSafeEqual(submitted, expected)) {
-    attempts.count += 1;
-    loginAttempts.set(clientIp, attempts);
-    return res.status(401).json({ success: false, message: '관리자 비밀번호가 올바르지 않습니다.' });
-  }
-  loginAttempts.delete(clientIp);
-  const expiresAt = Date.now() + 12 * 60 * 60 * 1000;
-  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
-  res.setHeader('Set-Cookie', `portfolio_admin=${encodeURIComponent(adminSessionToken(expiresAt))}; HttpOnly; Path=/; SameSite=Lax; Max-Age=43200${secure}`);
-  res.json({ success: true });
-});
-
-app.post('/api/admin/logout', (req, res) => {
-  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
-  res.setHeader('Set-Cookie', `portfolio_admin=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${secure}`);
-  res.json({ success: true });
-});
-
-app.get('/api/posts', async (req, res) => {
+app.get('/api/posts', requireUser, async (req, res) => {
   try {
-    const posts = await PortfolioPost.find({ deletedAt: null }).sort({ createdAt: -1, _id: -1 }).lean();
+    const posts = await PortfolioPost.find({ ownerId: req.user._id, deletedAt: null }).sort({ createdAt: -1, _id: -1 }).lean();
     res.json({ success: true, posts: posts.map(serializePost) });
   } catch (err) {
     console.error('게시물 목록 조회 실패:', err);
@@ -124,9 +76,9 @@ app.get('/api/posts', async (req, res) => {
   }
 });
 
-app.get('/api/trash', requireAdmin, async (req, res) => {
+app.get('/api/trash', requireUser, async (req, res) => {
   try {
-    const posts = await PortfolioPost.find({ deletedAt: { $ne: null } }).sort({ deletedAt: -1, _id: -1 }).lean();
+    const posts = await PortfolioPost.find({ ownerId: req.user._id, deletedAt: { $ne: null } }).sort({ deletedAt: -1, _id: -1 }).lean();
     res.json({ success: true, posts: posts.map(serializePost) });
   } catch (err) {
     console.error('휴지통 조회 실패:', err);
@@ -134,10 +86,10 @@ app.get('/api/trash', requireAdmin, async (req, res) => {
   }
 });
 
-app.get('/api/posts/:id', async (req, res) => {
+app.get('/api/posts/:id', requireUser, async (req, res) => {
   if (!/^[a-f\d]{24}$/i.test(req.params.id)) return res.status(400).json({ success: false, message: '올바르지 않은 게시물 ID입니다.' });
   try {
-    const post = await PortfolioPost.findOne({ _id: req.params.id, deletedAt: null }).lean();
+    const post = await PortfolioPost.findOne({ _id: req.params.id, ownerId: req.user._id, deletedAt: null }).lean();
     if (!post) return res.status(404).json({ success: false, message: '게시물을 찾을 수 없습니다.' });
     res.json({ success: true, post: serializePost(post) });
   } catch (err) {
@@ -146,12 +98,12 @@ app.get('/api/posts/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/posts/:id', requireAdmin, async (req, res) => {
+app.delete('/api/posts/:id', requireUser, async (req, res) => {
   if (!/^[a-f\d]{24}$/i.test(req.params.id)) {
     return res.status(400).json({ success: false, message: '올바르지 않은 게시물 ID입니다.' });
   }
   try {
-    const post = await PortfolioPost.findById(req.params.id);
+    const post = await PortfolioPost.findOne({ _id: req.params.id, ownerId: req.user._id });
     if (!post) return res.status(404).json({ success: false, message: '게시물을 찾을 수 없습니다.' });
     if (post.deletedAt) return res.status(409).json({ success: false, message: '이미 휴지통에 있는 게시물입니다.' });
     const deletedAt = new Date();
@@ -165,14 +117,14 @@ app.delete('/api/posts/:id', requireAdmin, async (req, res) => {
   }
 });
 
-app.post('/api/trash/restore', requireAdmin, async (req, res) => {
+app.post('/api/trash/restore', requireUser, async (req, res) => {
   const ids = req.body?.ids;
   if (!Array.isArray(ids) || ids.length < 1 || ids.length > 100 || ids.some(id => typeof id !== 'string' || !/^[a-f\d]{24}$/i.test(id))) {
     return res.status(400).json({ success: false, message: '복원할 게시물을 올바르게 선택해 주세요.' });
   }
   try {
     const result = await PortfolioPost.updateMany(
-      { _id: { $in: ids }, deletedAt: { $ne: null } },
+      { _id: { $in: ids }, ownerId: req.user._id, deletedAt: { $ne: null } },
       { $set: { deletedAt: null, expiresAt: null } }
     );
     res.json({ success: true, restored: result.modifiedCount });
@@ -182,11 +134,11 @@ app.post('/api/trash/restore', requireAdmin, async (req, res) => {
   }
 });
 
-app.post('/api/trash/:id/restore', requireAdmin, async (req, res) => {
+app.post('/api/trash/:id/restore', requireUser, async (req, res) => {
   if (!/^[a-f\d]{24}$/i.test(req.params.id)) return res.status(400).json({ success: false, message: '올바르지 않은 게시물 ID입니다.' });
   try {
     const post = await PortfolioPost.findOneAndUpdate(
-      { _id: req.params.id, deletedAt: { $ne: null } },
+      { _id: req.params.id, ownerId: req.user._id, deletedAt: { $ne: null } },
       { $set: { deletedAt: null, expiresAt: null } },
       { new: true }
     );
@@ -198,10 +150,10 @@ app.post('/api/trash/:id/restore', requireAdmin, async (req, res) => {
   }
 });
 
-app.delete('/api/trash/:id', requireAdmin, async (req, res) => {
+app.delete('/api/trash/:id', requireUser, async (req, res) => {
   if (!/^[a-f\d]{24}$/i.test(req.params.id)) return res.status(400).json({ success: false, message: '올바르지 않은 게시물 ID입니다.' });
   try {
-    const post = await PortfolioPost.findOneAndDelete({ _id: req.params.id, deletedAt: { $ne: null } });
+    const post = await PortfolioPost.findOneAndDelete({ _id: req.params.id, ownerId: req.user._id, deletedAt: { $ne: null } });
     if (!post) return res.status(404).json({ success: false, message: '휴지통에서 게시물을 찾을 수 없습니다.' });
     await cleanupGridFsFiles((post.media || []).map(item => item.fileId));
     res.json({ success: true });
@@ -211,12 +163,14 @@ app.delete('/api/trash/:id', requireAdmin, async (req, res) => {
   }
 });
 
-app.get('/api/media/:id', async (req, res) => {
+app.get('/api/media/:id', requireUser, async (req, res) => {
   if (!/^[a-f\d]{24}$/i.test(req.params.id)) {
     return res.status(400).json({ success: false, message: '올바르지 않은 미디어 ID입니다.' });
   }
   try {
     const fileId = new mongoose.Types.ObjectId(req.params.id);
+    const ownerPost = await PortfolioPost.findOne({ ownerId: req.user._id, 'media.fileId': fileId }).select('_id');
+    if (!ownerPost) return res.status(404).json({ success: false, message: '미디어 파일을 찾을 수 없습니다.' });
     const file = await mediaBucket.find({ _id: fileId }).next();
     if (!file) return res.status(404).json({ success: false, message: '미디어 파일을 찾을 수 없습니다.' });
     let start = 0;
@@ -255,7 +209,7 @@ app.get('/api/media/:id', async (req, res) => {
         : 'inline',
       'X-Content-Type-Options': 'nosniff',
       'Accept-Ranges': 'bytes',
-      'Cache-Control': 'public, max-age=31536000, immutable'
+      'Cache-Control': 'private, no-store'
     });
     const download = mediaBucket.openDownloadStream(fileId, { start, end: end + 1 });
     download.on('error', error => {
@@ -268,7 +222,7 @@ app.get('/api/media/:id', async (req, res) => {
   }
 });
 
-app.post('/api/posts', requireAdmin, upload.array('media', 10), async (req, res) => {
+app.post('/api/posts', requireUser, upload.array('media', 10), async (req, res) => {
   const uploadedIds = [];
   try {
     const title = (req.body.title || '').trim();
@@ -286,13 +240,13 @@ app.post('/api/posts', requireAdmin, upload.array('media', 10), async (req, res)
       const stored = await storeMediaFile(file, uploadedIds);
       media.push(stored);
     }
-    const bodyHtml = sanitizeRichText(req.body.bodyHtml || '', createInlineMediaMap(req.body.inlineMedia, media));
+    const bodyHtml = sanitizeRichText(req.body.bodyHtml || '', createInlineMediaMap(req.body.inlineMedia, media), new Set(media.map(item => String(item.fileId))));
     const description = plainTextFromHtml(bodyHtml).trim();
     if (description.length > 25000 || bodyHtml.length > 150000) {
       await Promise.all([cleanupTempFiles(req.files), cleanupGridFsFiles(uploadedIds)]);
       return res.status(400).json({ success: false, message: '본문은 최대 25,000자까지 작성할 수 있어요.' });
     }
-    const post = await PortfolioPost.create({ title, description, bodyHtml, category, media });
+    const post = await PortfolioPost.create({ ownerId: req.user._id, title, description, bodyHtml, category, media });
     await cleanupTempFiles(req.files);
     res.status(201).json({ success: true, post: serializePost(post) });
   } catch (err) {
@@ -305,14 +259,14 @@ app.post('/api/posts', requireAdmin, upload.array('media', 10), async (req, res)
   }
 });
 
-app.put('/api/posts/:id', requireAdmin, upload.array('media', 10), async (req, res) => {
+app.put('/api/posts/:id', requireUser, upload.array('media', 10), async (req, res) => {
   const uploadedIds = [];
   if (!/^[a-f\d]{24}$/i.test(req.params.id)) {
     await cleanupTempFiles(req.files);
     return res.status(400).json({ success: false, message: '올바르지 않은 게시물 ID입니다.' });
   }
   try {
-    const post = await PortfolioPost.findOne({ _id: req.params.id, deletedAt: null });
+    const post = await PortfolioPost.findOne({ _id: req.params.id, ownerId: req.user._id, deletedAt: null });
     if (!post) {
       await cleanupTempFiles(req.files);
       return res.status(404).json({ success: false, message: '수정할 게시물을 찾을 수 없습니다.' });
@@ -334,7 +288,7 @@ app.put('/api/posts/:id', requireAdmin, upload.array('media', 10), async (req, r
       media.push(stored);
       addedMedia.push(stored);
     }
-    const bodyHtml = sanitizeRichText(req.body.bodyHtml || '', createInlineMediaMap(req.body.inlineMedia, addedMedia));
+    const bodyHtml = sanitizeRichText(req.body.bodyHtml || '', createInlineMediaMap(req.body.inlineMedia, addedMedia), new Set(media.map(item => String(item.fileId))));
     const description = plainTextFromHtml(bodyHtml).trim();
     if (description.length > 25000 || bodyHtml.length > 150000) {
       await Promise.all([cleanupTempFiles(req.files), cleanupGridFsFiles(uploadedIds)]);
@@ -423,8 +377,10 @@ async function purgeExpiredTrash() {
   const now = new Date();
   const expired = await PortfolioPost.find({ deletedAt: { $ne: null }, expiresAt: { $lte: now } }).select('_id media').lean();
   if (!expired.length) return;
-  await cleanupGridFsFiles(expired.flatMap(post => (post.media || []).map(item => item.fileId)));
-  await PortfolioPost.deleteMany({ _id: { $in: expired.map(post => post._id) }, deletedAt: { $ne: null }, expiresAt: { $lte: now } });
+  for (const candidate of expired) {
+    const removed = await PortfolioPost.findOneAndDelete({ _id: candidate._id, deletedAt: { $ne: null }, expiresAt: { $lte: now } });
+    if (removed) await cleanupGridFsFiles((removed.media || []).map(item => item.fileId));
+  }
 }
 
 async function cleanupExpiredMediaOrphans() {
@@ -437,7 +393,7 @@ async function cleanupExpiredMediaOrphans() {
 
 const richTextTags = new Set(['p', 'div', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'ul', 'ol', 'li', 'blockquote', 'h1', 'h2', 'h3', 'span', 'figure', 'figcaption', 'img', 'video', 'a']);
 
-function sanitizeRichText(input, inlineMedia = new Map()) {
+function sanitizeRichText(input, inlineMedia = new Map(), allowedMedia = new Set()) {
   const source = String(input).slice(0, 160000)
     .replace(/<(script|style|iframe|object|svg|math|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
     .replace(/<!--[\s\S]*?-->/g, '');
@@ -463,14 +419,14 @@ function sanitizeRichText(input, inlineMedia = new Map()) {
     if (tag === 'img' || tag === 'video') {
       const expectedType = tag === 'img' ? 'image' : 'video';
       const src = uploaded?.type === expectedType ? `/api/media/${uploaded.fileId}` : attribute('src');
-      if (!/^\/api\/media\/[a-f\d]{24}$/i.test(src)) continue;
+      if (!/^\/api\/media\/[a-f\d]{24}$/i.test(src) || !allowedMedia.has(src.split('/').pop())) continue;
       safeAttributes += ` src="${src}"`;
       if (tag === 'img') safeAttributes += ` alt="${escapeHtml(uploaded?.name || attribute('alt').slice(0, 200))}" loading="lazy"`;
       else safeAttributes += ' controls playsinline preload="metadata"';
     }
     if (tag === 'a') {
       const href = uploaded?.type === 'file' ? `/api/media/${uploaded.fileId}` : attribute('href');
-      if (/^\/api\/media\/[a-f\d]{24}$/i.test(href)) safeAttributes += ` href="${href}" download`;
+      if (/^\/api\/media\/[a-f\d]{24}$/i.test(href) && allowedMedia.has(href.split('/').pop())) safeAttributes += ` href="${href}" download`;
       else {
         try { const external = new URL(href); if (external.protocol !== 'https:') continue; safeAttributes += ` href="${escapeHtml(external.href)}" target="_blank" rel="noopener noreferrer"`; }
         catch { continue; }
@@ -518,32 +474,25 @@ function plainTextFromHtml(html) {
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
   const status = err instanceof multer.MulterError ? 400 : 500;
-  let message = err.message || '요청을 처리하지 못했습니다.';
+  let message = status >= 500 ? '요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.' : err.message;
   if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') message = '파일당 최대 크기는 50MB입니다.';
   if (req.path.startsWith('/api/')) return res.status(status).json({ success: false, message });
   res.status(status).send(message);
 });
 
-if (!MONGO_URI) {
-  console.error('MongoDB 연결 실패: MONGODB_URI 환경 변수를 설정해주세요.');
-  process.exit(1);
+async function start() {
+  if (!MONGO_URI) throw new Error('MONGODB_URI 환경 변수를 설정해주세요.');
+  await mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 10000 });
+  await Promise.all([PortfolioPost.createIndexes(), PortfolioUser.createIndexes(), PortfolioSession.createIndexes()]);
+  await auth.initializeAdmin(PortfolioPost);
+  mediaBucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, { bucketName: GRIDFS_BUCKET_NAME });
+  await purgeExpiredTrash();
+  await cleanupExpiredMediaOrphans();
+  setInterval(async () => {
+    try { await purgeExpiredTrash(); await cleanupExpiredMediaOrphans(); }
+    catch (err) { console.error('휴지통 정리 실패:', err.message); }
+  }, 60 * 60 * 1000).unref();
+  server.listen(PORT, () => console.log('포트폴리오 서버 실행 중'));
 }
-
-mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 10000 })
-  .then(async () => {
-    await PortfolioPost.createIndexes();
-    console.log('MongoDB 연결 성공');
-    mediaBucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, { bucketName: GRIDFS_BUCKET_NAME });
-    await purgeExpiredTrash();
-    await cleanupExpiredMediaOrphans();
-    setInterval(async () => {
-      try { await purgeExpiredTrash(); await cleanupExpiredMediaOrphans(); }
-      catch (err) { console.error('휴지통 정리 실패:', err.message); }
-    }, 60 * 60 * 1000).unref();
-    server.listen(PORT, () => console.log(`서버 실행 중: http://localhost:${PORT}`));
-  })
-  .catch(err => {
-    console.error('MongoDB 연결 실패:', err.message);
-    process.exit(1);
-  });
-
+module.exports = { app, start, sanitizeRichText, auth };
+if (require.main === module) start().catch(error => { console.error('서버 시작 실패:', error.message); process.exit(1); });

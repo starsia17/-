@@ -8,6 +8,7 @@ const MediaSchema = new mongoose.Schema({
 }, { _id: false });
 
 const PortfolioPostSchema = new mongoose.Schema({
+  ownerId: { type: mongoose.Schema.Types.ObjectId, required: true, ref: 'PortfolioUser' },
   title: { type: String, required: true, trim: true, maxlength: 120 },
   description: { type: String, default: '', trim: true, maxlength: 25000 },
   bodyHtml: { type: String, default: '', maxlength: 150000 },
@@ -19,8 +20,10 @@ const PortfolioPostSchema = new mongoose.Schema({
 });
 
 PortfolioPostSchema.index({ createdAt: -1, _id: -1 });
+PortfolioPostSchema.index({ ownerId: 1, deletedAt: 1, createdAt: -1 });
 PortfolioPostSchema.index({ category: 1, createdAt: -1 });
 PortfolioPostSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0, partialFilterExpression: { expiresAt: { $type: 'date' } } });
 
 module.exports = mongoose.model('PortfolioPost', PortfolioPostSchema, 'portfolioPosts');
+
 
