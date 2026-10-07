@@ -24,10 +24,14 @@
   <script src="/js/main.js?v=private3" defer></script>
   <script src="/js/portfolio-builder.js?v=3" defer></script>
   <link rel="stylesheet" href="/css/portfolio-builder.css?v=2">
+  <link rel="stylesheet" href="/css/navigation.css?v=1">
+  <script src="/js/navigation.js?v=1" defer></script>
 </head>
 <body>
   <header class="topbar">
     <a class="wordmark" href="#top" aria-label="작업 아카이브 홈"><img class="brand-logo" src="/assets/site-logo.svg?v=3" alt="ARCHIVE · Portfolio for My Dream"></a>
+    <button data-private hidden class="mobile-menu-toggle" type="button" aria-controls="siteNavigation" aria-expanded="false"><span class="menu-toggle-label">메뉴</span><span class="menu-toggle-icon" aria-hidden="true"><span></span><span></span></span></button>
+    <div data-private hidden id="siteNavigation" class="site-navigation">
     <nav data-private hidden class="top-nav" aria-label="주요 메뉴">
       <a href="#work">작업물</a>
       <a href="#portfolios">내 포트폴리오</a>
@@ -46,6 +50,7 @@
     </nav>
     <a data-private hidden class="nav-cta" href="#write">게시글 등록하기 <span aria-hidden="true">↗</span></a>
     <div data-private hidden class="account-actions"><span id="accountBadge"></span><button data-logout type="button">로그아웃</button></div>
+    </div>
   </header>
 
   <section id="authScreen" class="auth-screen" aria-labelledby="authTitle">
@@ -301,3 +306,5 @@
   </dialog>
 </body>
 </html>
+
+
