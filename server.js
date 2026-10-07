@@ -84,8 +84,14 @@ app.get('/api/posts', requireUser, async (req, res) => {
 
 app.get('/api/trash', requireUser, async (req, res) => {
   try {
-    const posts = await PortfolioPost.find({ ownerId: req.user._id, deletedAt: { $ne: null } }).sort({ deletedAt: -1, _id: -1 }).lean();
-    res.json({ success: true, posts: posts.map(serializePost) });
+    const now = new Date();
+    const [posts, portfolios] = await Promise.all([
+      PortfolioPost.find({ ownerId: req.user._id, deletedAt: { $ne: null }, expiresAt: { $gt: now } }).sort({ deletedAt: -1, _id: -1 }).lean(),
+      PortfolioCollection.find({ ownerId: req.user._id, deletedAt: { $ne: null }, expiresAt: { $gt: now } }).sort({ deletedAt: -1, _id: -1 }).lean()
+    ]);
+    res.json({ success: true, posts: posts.map(serializePost), portfolios: portfolios.map(item => ({
+      _id: String(item._id), title: item.title, postCount: item.postIds.length, deletedAt: item.deletedAt, expiresAt: item.expiresAt
+    })) });
   } catch (err) {
     console.error('휴지통 조회 실패:', err);
     res.status(500).json({ success: false, message: '휴지통을 불러오지 못했습니다.' });
@@ -109,13 +115,10 @@ app.delete('/api/posts/:id', requireUser, async (req, res) => {
     return res.status(400).json({ success: false, message: '올바르지 않은 게시물 ID입니다.' });
   }
   try {
-    const post = await PortfolioPost.findOne({ _id: req.params.id, ownerId: req.user._id });
-    if (!post) return res.status(404).json({ success: false, message: '게시물을 찾을 수 없습니다.' });
-    if (post.deletedAt) return res.status(409).json({ success: false, message: '이미 휴지통에 있는 게시물입니다.' });
     const deletedAt = new Date();
-    post.deletedAt = deletedAt;
-    post.expiresAt = new Date(deletedAt.getTime() + 30 * 24 * 60 * 60 * 1000);
-    await post.save();
+    const post = await PortfolioPost.findOneAndUpdate({ _id: req.params.id, ownerId: req.user._id, deletedAt: null },
+      { $set: { deletedAt, expiresAt: new Date(deletedAt.getTime() + TRASH_RETENTION_MS) } }, { new: true });
+    if (!post) return res.status(404).json({ success: false, message: '게시물을 찾을 수 없거나 이미 휴지통에 있습니다.' });
     res.json({ success: true, post: serializePost(post) });
   } catch (err) {
     console.error('게시물 휴지통 이동 실패:', err);
@@ -124,16 +127,23 @@ app.delete('/api/posts/:id', requireUser, async (req, res) => {
 });
 
 app.post('/api/trash/restore', requireUser, async (req, res) => {
-  const ids = req.body?.ids;
-  if (!Array.isArray(ids) || ids.length < 1 || ids.length > 100 || ids.some(id => typeof id !== 'string' || !/^[a-f\d]{24}$/i.test(id))) {
+  const ids = req.body?.ids ?? [], portfolioIds = req.body?.portfolioIds ?? [];
+  const validIds = values => Array.isArray(values) && values.length <= 100 && values.every(id => typeof id === 'string' && /^[a-f\d]{24}$/i.test(id));
+  if (!validIds(ids) || !validIds(portfolioIds) || ids.length + portfolioIds.length < 1 || ids.length + portfolioIds.length > 100) {
     return res.status(400).json({ success: false, message: '복원할 게시물을 올바르게 선택해 주세요.' });
   }
   try {
-    const result = await PortfolioPost.updateMany(
-      { _id: { $in: ids }, ownerId: req.user._id, deletedAt: { $ne: null } },
+    const now = new Date();
+    const postResult = await PortfolioPost.updateMany(
+      { _id: { $in: ids }, ownerId: req.user._id, deletedAt: { $ne: null }, expiresAt: { $gt: now } },
       { $set: { deletedAt: null, expiresAt: null } }
     );
-    res.json({ success: true, restored: result.modifiedCount });
+    const portfolioResult = await PortfolioCollection.updateMany(
+      { _id: { $in: portfolioIds }, ownerId: req.user._id, deletedAt: { $ne: null }, expiresAt: { $gt: now } },
+      { $set: { deletedAt: null, expiresAt: null }, $inc: { revision: 1 } }
+    );
+    res.json({ success: true, restored: postResult.modifiedCount + portfolioResult.modifiedCount,
+      restoredPosts: postResult.modifiedCount, restoredPortfolios: portfolioResult.modifiedCount });
   } catch (err) {
     console.error('선택 게시물 복원 실패:', err);
     res.status(500).json({ success: false, message: '게시물을 복원하지 못했습니다.' });
@@ -144,7 +154,7 @@ app.post('/api/trash/:id/restore', requireUser, async (req, res) => {
   if (!/^[a-f\d]{24}$/i.test(req.params.id)) return res.status(400).json({ success: false, message: '올바르지 않은 게시물 ID입니다.' });
   try {
     const post = await PortfolioPost.findOneAndUpdate(
-      { _id: req.params.id, ownerId: req.user._id, deletedAt: { $ne: null } },
+      { _id: req.params.id, ownerId: req.user._id, deletedAt: { $ne: null }, expiresAt: { $gt: new Date() } },
       { $set: { deletedAt: null, expiresAt: null } },
       { new: true }
     );
@@ -379,6 +389,7 @@ async function cleanupGridFsFiles(ids = []) {
 }
 
 async function purgeExpiredTrash() {
+  await PortfolioCollection.deleteMany({ deletedAt: { $ne: null }, expiresAt: { $lte: new Date() } });
   if (!mediaBucket) return;
   const now = new Date();
   const expired = await PortfolioPost.find({ deletedAt: { $ne: null }, expiresAt: { $lte: now } }).select('_id media').lean();

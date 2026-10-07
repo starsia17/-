@@ -37,6 +37,8 @@ let dialogPost = null;
 let dialogIndex = 0;
 let isAuthenticated = false;
 let selectedTrashIds = new Set();
+let trashLoadSequence = 0;
+let trashBusy = false;
 let detailLoadSequence = 0;
 if ('scrollRestoration' in history) history.scrollRestoration = 'auto';
 let authEpoch = 0;
@@ -67,7 +69,7 @@ function canonicalBody(root) {
 function applyAuthState(user) {
   const next = user ? user.kind + ':' + user.username : null;
   if (next === identity) return;
-  identity = next; authEpoch++; detailLoadSequence++;
+  identity = next; authEpoch++; detailLoadSequence++; trashLoadSequence++; trashBusy = false;
   isAuthenticated = !!user;
   postForm.hidden = !user;
   posts = []; selectedTrashIds.clear();
@@ -844,6 +846,7 @@ async function saveInlinePostEdit(post, elements, queue, saveButton, cancelButto
 
 async function loadTrash() {
   const epoch = authEpoch;
+  const sequence = ++trashLoadSequence;
   trashList.replaceChildren();
   selectedTrashIds = new Set();
   selectAllTrash.checked = false;
@@ -852,31 +855,38 @@ async function loadTrash() {
   updateTrashSelection(0);
   document.querySelector('#trashEmpty').hidden = true;
   if (!isAuthenticated) {
-    trashList.textContent = '휴지통은 관리자 로그인 후 확인할 수 있습니다.';
+    trashList.textContent = '휴지통은 로그인 후 확인할 수 있습니다.';
     return;
   }
   try {
     const response = await apiFetch('/api/trash');
     const data = await readApiResponse(response);
-    if (epoch !== authEpoch) return;
-    trashBulkActions.hidden = data.posts.length === 0;
-    data.posts.forEach(post => {
+    if (epoch !== authEpoch || sequence !== trashLoadSequence || location.hash !== '#trash') return;
+    const items = [...data.posts.map(post => ({ ...post, kind: 'post' })), ...(data.portfolios || []).map(item => ({ ...item, kind: 'portfolio' }))]
+      .sort((a, b) => new Date(b.deletedAt) - new Date(a.deletedAt));
+    trashBulkActions.hidden = items.length === 0;
+    items.forEach(post => {
+      const key = post.kind + ':' + post._id;
+      const kindLabel = post.kind === 'portfolio' ? '포트폴리오' : '게시글';
       const row = document.createElement('article'); row.className = 'trash-row';
       const selection = document.createElement('label'); selection.className = 'trash-select-label';
       const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'trash-select';
-      checkbox.value = post._id; checkbox.setAttribute('aria-label', `게시물 ${post.title} 선택`);
+      checkbox.value = key; checkbox.setAttribute('aria-label', `${kindLabel} ${post.title} 선택`);
       checkbox.addEventListener('change', () => {
-        if (checkbox.checked) selectedTrashIds.add(post._id);
-        else selectedTrashIds.delete(post._id);
-        updateTrashSelection(data.posts.length);
+        if (checkbox.checked) selectedTrashIds.add(key);
+        else selectedTrashIds.delete(key);
+        updateTrashSelection(items.length);
       });
       selection.append(checkbox);
       const info = document.createElement('div'); info.className = 'trash-row-info';
+      const badge = document.createElement('span'); badge.className = 'trash-item-kind kind-' + post.kind;
+      badge.textContent = kindLabel + (post.kind === 'portfolio' ? ' · ' + post.postCount + '개 작업' : '');
       const title = document.createElement('strong'); title.textContent = post.title;
       const expiration = document.createElement('span');
       const days = Math.max(0, Math.ceil((new Date(post.expiresAt) - Date.now()) / 86400000));
-      expiration.textContent = `${formatDate(post.deletedAt)} 삭제 · ${days}일 후 영구 삭제`;
-      info.append(title, expiration);
+      const deadline = new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Seoul' }).format(new Date(post.expiresAt));
+      expiration.textContent = `${formatDate(post.deletedAt)} 삭제 · ${days}일 남음 · ${deadline} 이후 자동 영구 삭제`;
+      info.append(badge, title, expiration);
       const summary = document.createElement('div'); summary.className = 'trash-row-summary';
       summary.append(selection, info);
       const actions = document.createElement('div'); actions.className = 'trash-actions';
@@ -886,23 +896,26 @@ async function loadTrash() {
       erase.addEventListener('click', () => permanentlyDeletePost(post));
       actions.append(restore, erase); row.append(summary, actions); trashList.append(row);
     });
-    updateTrashSelection(data.posts.length);
-    document.querySelector('#trashEmpty').hidden = data.posts.length > 0;
+    updateTrashSelection(items.length);
+    document.querySelector('#trashEmpty').hidden = items.length > 0;
+    setTrashBusy(trashBusy);
   } catch (error) {
+    if (epoch !== authEpoch || sequence !== trashLoadSequence || location.hash !== '#trash') return;
     const message = document.querySelector('#trashMessage'); message.textContent = error.message; message.hidden = false;
   }
 }
 
 function updateTrashSelection(total) {
   const selected = selectedTrashIds.size;
-  trashSelectionCount.textContent = selected ? `선택된 게시물 ${selected}개` : '선택된 게시물 없음';
-  restoreSelectedButton.disabled = selected === 0;
-  restoreSelectedButton.textContent = selected ? `선택한 게시물 ${selected}개 복원` : '선택한 게시물 복원';
+  trashSelectionCount.textContent = selected ? `선택된 항목 ${selected}개` : '선택된 항목 없음';
+  restoreSelectedButton.disabled = trashBusy || selected === 0;
+  restoreSelectedButton.textContent = selected ? `선택한 항목 ${selected}개 복원` : '선택한 항목 복원';
   selectAllTrash.checked = total > 0 && selected === total;
   selectAllTrash.indeterminate = selected > 0 && selected < total;
 }
 
 selectAllTrash.addEventListener('change', () => {
+  if (trashBusy) return;
   const checkboxes = trashList.querySelectorAll('.trash-select');
   selectedTrashIds = new Set(selectAllTrash.checked ? Array.from(checkboxes, checkbox => checkbox.value) : []);
   checkboxes.forEach(checkbox => { checkbox.checked = selectAllTrash.checked; });
@@ -911,46 +924,70 @@ selectAllTrash.addEventListener('change', () => {
 
 restoreSelectedButton.addEventListener('click', restoreSelectedPosts);
 
+function setTrashBusy(busy) {
+  trashBusy = busy;
+  trashList.querySelectorAll('input,button').forEach(node => { node.disabled = busy; });
+  selectAllTrash.disabled = busy;
+  updateTrashSelection(trashList.querySelectorAll('.trash-select').length);
+}
+
+function trashEndpoint(item) {
+  return item.kind === 'portfolio' ? `/api/trash/portfolios/${encodeURIComponent(item._id)}` : `/api/trash/${encodeURIComponent(item._id)}`;
+}
+
 async function restoreSelectedPosts() {
   const ids = Array.from(selectedTrashIds);
-  if (!ids.length) return;
-  restoreSelectedButton.disabled = true;
+  if (!ids.length || trashBusy) return;
+  const epoch = authEpoch; setTrashBusy(true);
   try {
     let restored = 0;
     for (let index = 0; index < ids.length; index += 100) {
+      if (epoch !== authEpoch) return;
+      const batch = ids.slice(index, index + 100);
       const response = await apiFetch('/api/trash/restore', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: ids.slice(index, index + 100) })
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+          ids: batch.filter(key => key.startsWith('post:')).map(key => key.slice(5)),
+          portfolioIds: batch.filter(key => key.startsWith('portfolio:')).map(key => key.slice(10))
+        })
       });
       const data = await readApiResponse(response);
       restored += data.restored;
     }
     const message = document.querySelector('#trashMessage');
-    message.textContent = `${restored}개 게시물을 원래 내용과 함께 홈에 복원했습니다.`;
+    message.textContent = `${restored}개 항목을 복원했습니다. 게시글은 작업 아카이브, 포트폴리오는 내 포트폴리오에서 확인하세요.` + (restored < ids.length ? ' 보관 기간이 지났거나 이미 처리된 항목은 제외했습니다.' : '');
     message.hidden = false;
     await Promise.all([loadTrash(), loadPosts()]);
   } catch (error) {
+    if (epoch !== authEpoch) return;
     window.alert(error.message || '게시물을 복원하지 못했습니다.');
-    restoreSelectedButton.disabled = false;
-  }
+    await Promise.all([loadTrash(), loadPosts()]);
+  } finally { if (epoch === authEpoch) setTrashBusy(false); }
 }
 
 async function restorePost(post) {
+  if (trashBusy) return;
+  const epoch = authEpoch; setTrashBusy(true);
   try {
-    const response = await apiFetch(`/api/trash/${encodeURIComponent(post._id)}/restore`, { method: 'POST' });
+    const response = await apiFetch(trashEndpoint(post) + '/restore', { method: 'POST' });
     await readApiResponse(response);
-    document.querySelector('#trashMessage').textContent = '게시물을 복원했습니다.';
+    document.querySelector('#trashMessage').textContent = post.kind === 'portfolio' ? '포트폴리오를 원래 구성으로 복원했습니다. 내 포트폴리오에서 확인하세요.' : '게시글을 원래 내용으로 복원했습니다.';
     document.querySelector('#trashMessage').hidden = false;
     await Promise.all([loadTrash(), loadPosts()]);
-  } catch (error) { window.alert(error.message || '복원하지 못했습니다.'); }
+  } catch (error) { if (epoch === authEpoch) window.alert(error.message || '복원하지 못했습니다.'); }
+  finally { if (epoch === authEpoch) setTrashBusy(false); }
 }
 
 async function permanentlyDeletePost(post) {
-  if (!window.confirm(`“${post.title}” 게시물과 첨부 파일을 완전히 삭제할까요? 복구할 수 없습니다.`)) return;
+  if (trashBusy) return;
+  const description = post.kind === 'portfolio' ? '포트폴리오를 완전히 삭제할까요? 원본 게시글은 유지됩니다.' : '게시글과 첨부 파일을 완전히 삭제할까요?';
+  if (!window.confirm(`“${post.title}” ${description} 복구할 수 없습니다.`)) return;
+  const epoch = authEpoch; setTrashBusy(true);
   try {
-    const response = await apiFetch(`/api/trash/${encodeURIComponent(post._id)}`, { method: 'DELETE' });
+    const response = await apiFetch(trashEndpoint(post), { method: 'DELETE' });
     await readApiResponse(response);
     await loadTrash();
-  } catch (error) { window.alert(error.message || '완전히 삭제하지 못했습니다.'); }
+  } catch (error) { if (epoch === authEpoch) window.alert(error.message || '완전히 삭제하지 못했습니다.'); }
+  finally { if (epoch === authEpoch) setTrashBusy(false); }
 }
 
 function plainText(html) {

@@ -18,9 +18,9 @@
   <script src="/js/notices.js?v=1" defer></script>
   <script src="/js/news.js?v=1" defer></script>
   <script src="/js/mypage.js?v=1" defer></script>
-  <script src="/js/main.js?v=private1" defer></script>
-  <script src="/js/portfolio-builder.js?v=1" defer></script>
-  <link rel="stylesheet" href="/css/portfolio-builder.css?v=1">
+  <script src="/js/main.js?v=private2" defer></script>
+  <script src="/js/portfolio-builder.js?v=2" defer></script>
+  <link rel="stylesheet" href="/css/portfolio-builder.css?v=2">
 </head>
 <body>
   <header class="topbar">
@@ -156,15 +156,15 @@
     <section id="postDetail" class="post-detail page-view" hidden aria-live="polite"></section>
     <section id="trashSection" class="trash-section page-view" hidden>
       <div class="section-heading"><div><p class="eyebrow">RECENTLY DELETED</p><h2>휴지통<span>.</span></h2></div><div class="work-count">30일 뒤 자동 삭제</div></div>
-      <p class="trash-intro">삭제한 게시물은 30일 동안 보관됩니다. 기간 안에는 복원할 수 있어요.</p>
+      <p class="trash-intro">내 계정에서 삭제한 게시글과 포트폴리오만 표시됩니다. 휴지통으로 이동한 시점부터 각각 30일 동안 보관되고, 이후 자동으로 영구 삭제됩니다. 기간 안에는 여러 항목을 함께 선택해 복원할 수 있어요. 포트폴리오를 복원해도 휴지통에 있는 원본 게시글은 별도로 복원해야 합니다.</p>
       <p id="trashMessage" class="notice" role="status" hidden></p>
       <div id="trashBulkActions" class="trash-bulk-actions" hidden>
         <label class="select-all-label"><input id="selectAllTrash" type="checkbox"><span>전체 선택</span></label>
-        <span id="trashSelectionCount" class="trash-selection-count">선택된 게시물 없음</span>
-        <button id="restoreSelectedButton" class="restore-selected-button" type="button" disabled>선택한 게시물 복원</button>
+        <span id="trashSelectionCount" class="trash-selection-count">선택된 항목 없음</span>
+        <button id="restoreSelectedButton" class="restore-selected-button" type="button" disabled>선택한 항목 복원</button>
       </div>
       <div id="trashList" class="trash-list"></div>
-      <div id="trashEmpty" class="empty-state" hidden><span class="empty-icon">♧</span><h3>휴지통이 비어 있어요</h3><p>삭제한 게시물이 여기에 보관됩니다.</p></div>
+      <div id="trashEmpty" class="empty-state" hidden><span class="empty-icon">♧</span><h3>휴지통이 비어 있어요</h3><p>삭제한 게시글과 포트폴리오가 여기에 보관됩니다.</p></div>
     </section>
 
     <section class="composer-page page-view" id="write" hidden>

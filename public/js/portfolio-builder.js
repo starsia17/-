@@ -82,11 +82,26 @@
   function renderList(items) {
     if (!items.length) { list.append(node('p', '아직 만든 포트폴리오가 없습니다. 작업을 선택해 첫 포트폴리오를 만들어보세요.', 'notice')); return; }
     items.forEach(item => {
-      const entry = node('a', undefined, 'portfolio-list-card'); entry.href = '#portfolio/' + item.id;
-      entry.append(node('span', 'MY COLLECTION', 'eyebrow'), node('h3', item.title), node('p', item.introduction || '나의 작업 모음'));
+      const entry = node('article', undefined, 'portfolio-list-card');
+      const open = node('a', undefined, 'portfolio-card-open'); open.href = '#portfolio/' + item.id;
+      open.append(node('span', 'MY COLLECTION', 'eyebrow'), node('h3', item.title), node('p', item.introduction || '나의 작업 모음'));
       const date = new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeZone: 'Asia/Seoul' }).format(new Date(item.updatedAt));
-      entry.append(node('small', item.postIds.length + '개 작업 · ' + date), node('span', '포트폴리오 열기 ↗')); list.append(entry);
+      open.append(node('small', item.postIds.length + '개 작업 · ' + date), node('span', '포트폴리오 열기 ↗'));
+      const remove = node('button', '휴지통으로 이동', 'portfolio-trash-button'); remove.type = 'button';
+      remove.setAttribute('aria-label', item.title + ' 포트폴리오 휴지통으로 이동');
+      remove.addEventListener('click', () => moveToTrash(item, remove)); entry.append(open, remove); list.append(entry);
     });
+  }
+  async function moveToTrash(item, button) {
+    if (button.disabled || !window.confirm('“' + item.title + '” 포트폴리오를 휴지통으로 이동할까요? 30일 안에 복원할 수 있습니다. 원본 게시글은 유지됩니다.')) return;
+    const version = epoch, request = sequence; button.disabled = true;
+    try {
+      await read('/api/portfolios/' + item.id, { method: 'DELETE' }, version);
+      if (version !== epoch || request !== sequence) return;
+      if (location.hash.startsWith('#portfolio/')) location.hash = 'portfolios';
+      else { await setVisible(true, 'portfolios'); status('포트폴리오를 휴지통으로 이동했습니다. 30일 안에 복원할 수 있습니다.'); }
+    } catch (error) { if (version === epoch && request === sequence) status(error.message, true); }
+    finally { button.disabled = false; }
   }
   async function setVisible(visible, route = 'portfolios') {
     page.hidden = !visible || !window.portfolioAuth.user; const request = ++sequence, version = epoch;
@@ -114,7 +129,9 @@
         if (request !== sequence || version !== epoch) return;
         const actions = node('div', undefined, 'portfolio-view-actions');
         const back = node('a', '← 내 포트폴리오'); back.href = '#portfolios';
-        const edit = node('a', '구성 수정'); edit.href = '#portfolio/' + data.portfolio.id + '/edit'; actions.append(back, edit);
+        const edit = node('a', '구성 수정'); edit.href = '#portfolio/' + data.portfolio.id + '/edit';
+        const remove = node('button', '휴지통으로 이동', 'portfolio-trash-button'); remove.type = 'button';
+        remove.addEventListener('click', () => moveToTrash(data.portfolio, remove)); actions.append(back, edit, remove);
         renderPortfolio(data.portfolio); output.prepend(actions);
       } else throw Error('올바르지 않은 포트폴리오 주소입니다.');
       status(editing?.unavailableCount ? '휴지통에 있거나 삭제된 게시글은 선택 목록에서 제외했습니다. 저장하면 현재 선택한 게시글로 구성이 변경됩니다.' : '');
