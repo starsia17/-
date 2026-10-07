@@ -612,3 +612,11 @@ body { background: var(--paper); }
   .editor-size-control input { width: 36px !important; }
 }
 
+
+.external-video-embed { width: min(100%, 860px); margin: 22px auto; aspect-ratio: 16 / 9; background: #111; border-radius: 6px; overflow: hidden; }
+.external-video-embed iframe { width: 100%; height: 100%; border: 0; display: block; }
+.font-size-step { display: inline-grid; place-items: center; flex: 0 0 auto; width: 30px; height: 30px; border: 1px solid #dce1d7; border-radius: 3px; background: #f7f8f5; color: #435044; font-size: 16px; line-height: 1; cursor: pointer; touch-action: manipulation; }
+@media (max-width: 760px) { .editor-size-control { gap: 4px; min-height: 48px; padding: 2px 5px; } .editor-size-control input { width: 48px !important; min-height: 44px !important; font-size: 16px !important; } .font-size-step { width: 44px; height: 44px; } }
+.brand-logo { display: block; width: 210px; height: auto; max-height: 38px; object-fit: contain; object-position: left center; }
+.topbar > .wordmark { flex: 0 0 auto; }
+@media (max-width: 700px) { .brand-logo { width: 152px; max-height: 34px; } }

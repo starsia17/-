@@ -277,7 +277,7 @@ app.post('/api/posts', requireAdmin, upload.array('media', 10), async (req, res)
       await cleanupTempFiles(req.files);
       return res.status(400).json({ success: false, message: '작업 제목을 입력해주세요.' });
     }
-    if (title.length > 120 || category.length > 40 || String(req.body.bodyHtml || '').length > 60000) {
+    if (title.length > 120 || category.length > 40 || String(req.body.bodyHtml || '').length > 160000) {
       await cleanupTempFiles(req.files);
       return res.status(400).json({ success: false, message: '입력한 내용이 허용 길이를 초과했습니다.' });
     }
@@ -288,9 +288,9 @@ app.post('/api/posts', requireAdmin, upload.array('media', 10), async (req, res)
     }
     const bodyHtml = sanitizeRichText(req.body.bodyHtml || '', createInlineMediaMap(req.body.inlineMedia, media));
     const description = plainTextFromHtml(bodyHtml).trim();
-    if (description.length > 5000 || bodyHtml.length > 30000) {
+    if (description.length > 25000 || bodyHtml.length > 150000) {
       await Promise.all([cleanupTempFiles(req.files), cleanupGridFsFiles(uploadedIds)]);
-      return res.status(400).json({ success: false, message: '본문은 5,000자까지 작성할 수 있어요.' });
+      return res.status(400).json({ success: false, message: '본문은 최대 25,000자까지 작성할 수 있어요.' });
     }
     const post = await PortfolioPost.create({ title, description, bodyHtml, category, media });
     await cleanupTempFiles(req.files);
@@ -319,7 +319,7 @@ app.put('/api/posts/:id', requireAdmin, upload.array('media', 10), async (req, r
     }
     const title = (req.body.title || '').trim();
     const category = (req.body.category || '기타').trim();
-    if (!title || title.length > 120 || category.length > 40 || String(req.body.bodyHtml || '').length > 60000) {
+    if (!title || title.length > 120 || category.length > 40 || String(req.body.bodyHtml || '').length > 160000) {
       await cleanupTempFiles(req.files);
       return res.status(400).json({ success: false, message: '제목을 확인하거나 입력한 내용의 길이를 줄여주세요.' });
     }
@@ -336,9 +336,9 @@ app.put('/api/posts/:id', requireAdmin, upload.array('media', 10), async (req, r
     }
     const bodyHtml = sanitizeRichText(req.body.bodyHtml || '', createInlineMediaMap(req.body.inlineMedia, addedMedia));
     const description = plainTextFromHtml(bodyHtml).trim();
-    if (description.length > 5000 || bodyHtml.length > 30000) {
+    if (description.length > 25000 || bodyHtml.length > 150000) {
       await Promise.all([cleanupTempFiles(req.files), cleanupGridFsFiles(uploadedIds)]);
-      return res.status(400).json({ success: false, message: '본문은 5,000자까지 작성할 수 있어요.' });
+      return res.status(400).json({ success: false, message: '본문은 최대 25,000자까지 작성할 수 있어요.' });
     }
     post.title = title;
     post.description = description;
@@ -438,7 +438,7 @@ async function cleanupExpiredMediaOrphans() {
 const richTextTags = new Set(['p', 'div', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'ul', 'ol', 'li', 'blockquote', 'h1', 'h2', 'h3', 'span', 'figure', 'figcaption', 'img', 'video', 'a']);
 
 function sanitizeRichText(input, inlineMedia = new Map()) {
-  const source = String(input).slice(0, 60000)
+  const source = String(input).slice(0, 160000)
     .replace(/<(script|style|iframe|object|svg|math|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
     .replace(/<!--[\s\S]*?-->/g, '');
   let output = '';
@@ -470,8 +470,11 @@ function sanitizeRichText(input, inlineMedia = new Map()) {
     }
     if (tag === 'a') {
       const href = uploaded?.type === 'file' ? `/api/media/${uploaded.fileId}` : attribute('href');
-      if (!/^\/api\/media\/[a-f\d]{24}$/i.test(href)) continue;
-      safeAttributes += ` href="${href}" download`;
+      if (/^\/api\/media\/[a-f\d]{24}$/i.test(href)) safeAttributes += ` href="${href}" download`;
+      else {
+        try { const external = new URL(href); if (external.protocol !== 'https:') continue; safeAttributes += ` href="${escapeHtml(external.href)}" target="_blank" rel="noopener noreferrer"`; }
+        catch { continue; }
+      }
     }
     output += `<${tag}${safeAttributes}>`;
   }

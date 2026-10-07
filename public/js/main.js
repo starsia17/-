@@ -35,6 +35,10 @@ let dialogPost = null;
 let dialogIndex = 0;
 let isAdmin = false;
 let selectedTrashIds = new Set();
+let detailLoadSequence = 0;
+if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+if (location.hash) history.replaceState(history.state, '', `${location.pathname}${location.search}`);
+requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'instant' }));
 
 loadPosts();
 refreshAdminStatus();
@@ -112,6 +116,9 @@ function renderPosts() {
     return categoryMatch && searchMatch;
   });
   postGrid.replaceChildren();
+  const uniquePosts = new Map();
+  posts.forEach(post => { if (post?._id && !uniquePosts.has(post._id)) uniquePosts.set(post._id, post); });
+  posts = Array.from(uniquePosts.values());
   postCount.textContent = String(posts.length).padStart(2, '0');
   visiblePosts.forEach((post, index) => postGrid.append(createPostCard(post, index)));
   emptyState.hidden = visiblePosts.length > 0;
@@ -414,6 +421,20 @@ function wireEditorToolbar(toolbar, target, queue, queueChanged, existingMediaCo
     delete input.dataset.appliedSize;
   });
   toolbar.querySelector('[data-font-color]')?.addEventListener('input', event => styleSelection(target, 'color', event.currentTarget.value));
+  toolbar.querySelectorAll('[data-font-step]').forEach(button => button.addEventListener('click', () => {
+    const input = toolbar.querySelector('[data-font-size]');
+    const size = Math.min(48, Math.max(12, (Number.parseInt(input.value, 10) || 16) + Number(button.dataset.fontStep)));
+    input.value = String(size); styleSelection(target, 'fontSize', `${size}px`); input.dataset.appliedSize = String(size);
+  }));
+  toolbar.querySelector('[data-add-video-link]')?.addEventListener('click', () => {
+    const value = window.prompt('YouTube, Vimeo 또는 외부 동영상 링크를 붙여 넣으세요.'); if (!value) return;
+    let url; try { url = new URL(value.trim()); } catch { window.alert('올바른 동영상 주소를 입력해주세요.'); return; }
+    if (url.protocol !== 'https:') { window.alert('보안을 위해 https 주소만 첨부할 수 있어요.'); return; }
+    const range = restoreEditorSelection(target); if (!range) { window.alert('링크를 넣을 본문 위치를 먼저 눌러주세요.'); return; }
+    const link = document.createElement('a'); link.href = url.href; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = `▶ 외부 동영상 보기 (${url.hostname})`;
+    range.deleteContents(); range.insertNode(link); const next = document.createRange(); next.setStartAfter(link); next.collapse(true);
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(next); savedEditorRanges.set(target, next.cloneRange());
+  });
   toolbar.querySelectorAll('[data-open-picker]').forEach(button => button.addEventListener('click', () => {
     toolbar.querySelector(`[data-file-input="${button.dataset.openPicker}"]`)?.click();
   }));
@@ -558,7 +579,36 @@ function syncPageFromHash() {
   if (isTrash) loadTrash();
 }
 
+function externalVideoEmbedUrl(value) {
+  let url; try { url = new URL(value); } catch { return null; }
+  if (url.protocol !== 'https:') return null;
+  const host = url.hostname.toLowerCase().replace(/^www\./, '');
+  if (host === 'youtu.be') { const videoId = url.pathname.split('/').filter(Boolean)[0]; return videoId && /^[\w-]{11}$/.test(videoId) ? `https://www.youtube-nocookie.com/embed/${videoId}` : null; }
+  if (['youtube.com', 'm.youtube.com', 'youtube-nocookie.com'].includes(host)) {
+    const videoId = url.searchParams.get('v') || url.pathname.match(/^\/(?:embed|shorts)\/([\w-]{11})/)?.[1];
+    return videoId && /^[\w-]{11}$/.test(videoId) ? `https://www.youtube-nocookie.com/embed/${videoId}` : null;
+  }
+  if (host === 'vimeo.com' || host === 'player.vimeo.com') { const videoId = url.pathname.match(/\/(?:video\/)?(\d+)/)?.[1]; return videoId ? `https://player.vimeo.com/video/${videoId}` : null; }
+  return null;
+}
+function renderExternalVideoLinks(article) {
+  article.querySelectorAll('a[href]').forEach(link => {
+    const src = externalVideoEmbedUrl(link.href); if (!src) return;
+    const figure = document.createElement('figure'); figure.className = 'external-video-embed'; figure.dataset.videoUrl = link.href;
+    const frame = document.createElement('iframe'); frame.src = src; frame.title = link.textContent.trim() || '외부 동영상';
+    frame.loading = 'lazy'; frame.referrerPolicy = 'strict-origin-when-cross-origin';
+    frame.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share'; frame.allowFullscreen = true;
+    figure.append(frame); link.replaceWith(figure);
+  });
+}
+function restoreExternalVideoLinks(article) {
+  article.querySelectorAll('figure.external-video-embed[data-video-url]').forEach(figure => {
+    const link = document.createElement('a'); link.href = figure.dataset.videoUrl; link.target = '_blank'; link.rel = 'noopener noreferrer';
+    link.textContent = `▶ 외부 동영상 보기 (${new URL(figure.dataset.videoUrl).hostname})`; figure.replaceWith(link);
+  });
+}
 async function loadPostDetail(id) {
+  const sequence = ++detailLoadSequence;
   detailView.replaceChildren();
   const cached = posts.find(post => post._id === id);
   try {
@@ -568,7 +618,7 @@ async function loadPostDetail(id) {
       const data = await readApiResponse(response);
       post = data.post;
     }
-    if (location.hash !== `#post/${id}`) return;
+    if (sequence !== detailLoadSequence || location.hash !== `#post/${id}`) return;
     const back = document.createElement('a');
     back.href = '#work'; back.className = 'detail-back'; back.textContent = '← 작업 아카이브';
     const meta = document.createElement('div'); meta.className = 'post-meta detail-meta';
@@ -582,6 +632,7 @@ async function loadPostDetail(id) {
     const article = document.createElement('article'); article.className = 'blog-article';
     if (post.bodyHtml) article.innerHTML = post.bodyHtml;
     else if (post.description) { const paragraph = document.createElement('p'); paragraph.textContent = post.description; article.append(paragraph); }
+    renderExternalVideoLinks(article);
     const media = document.createElement('div'); media.className = 'detail-media-list';
     const bodyTemplate = document.createElement('template'); bodyTemplate.innerHTML = post.bodyHtml || '';
     const embeddedUrls = new Set(Array.from(bodyTemplate.content.querySelectorAll('img[src],video[src],a[href]'), node => node.getAttribute('src') || node.getAttribute('href')));
@@ -616,6 +667,7 @@ async function loadPostDetail(id) {
       detailView.append(actions);
     }
   } catch (error) {
+    if (sequence !== detailLoadSequence) return;
     const message = document.createElement('p'); message.className = 'notice notice-error'; message.textContent = error.message;
     const back = document.createElement('a'); back.href = '#work'; back.className = 'detail-back'; back.textContent = '← 작업 아카이브';
     detailView.append(back, message);
@@ -630,6 +682,7 @@ function beginInlinePostEdit(post, elements) {
   elements.title.contentEditable = 'true'; elements.title.classList.add('title-editing');
   elements.title.setAttribute('role', 'textbox'); elements.title.setAttribute('aria-label', '게시물 제목');
   elements.category.hidden = true; elements.categoryEditor.hidden = false;
+  restoreExternalVideoLinks(elements.article);
   elements.article.contentEditable = 'true'; elements.article.setAttribute('role', 'textbox'); elements.article.setAttribute('aria-label', '게시물 본문 편집');
   elements.article.classList.add('article-editing');
   const queuePanel = document.createElement('div'); queuePanel.className = 'preview-list inline-edit-uploads';
@@ -655,7 +708,7 @@ async function saveInlinePostEdit(post, elements, queue, saveButton, cancelButto
   const title = elements.title.innerText.trim();
   const bodyText = elements.article.innerText.trim();
   if (!title) { message.textContent = '게시물 제목을 입력해주세요.'; message.hidden = false; return; }
-  if (bodyText.length > 5000 || elements.article.innerHTML.length > 30000) { message.textContent = '본문은 5,000자까지 작성할 수 있어요.'; message.hidden = false; return; }
+  if (bodyText.length > 25000 || elements.article.innerHTML.length > 150000) { message.textContent = '본문은 최대 25,000자까지 작성할 수 있어요.'; message.hidden = false; return; }
   const form = new FormData();
   form.set('title', title); form.set('category', elements.categoryEditor.value); form.set('bodyHtml', elements.article.innerHTML);
   form.set('inlineMedia', JSON.stringify(queue.map(item => ({ token: item.token }))));
@@ -797,7 +850,7 @@ postForm.addEventListener('submit', async event => {
   event.preventDefault();
   if (!postForm.reportValidity()) return;
   const bodyText = editor.innerText.trim();
-  if (bodyText.length > 5000) return showFormMessage('본문은 5,000자까지 작성할 수 있어요.', true);
+  if (bodyText.length > 25000 || editor.innerHTML.length > 150000) return showFormMessage('본문은 최대 25,000자까지 작성할 수 있어요.', true);
   const payload = new FormData();
   payload.set('title', document.querySelector('#titleInput').value.trim());
   payload.set('category', document.querySelector('#categoryInput').value);

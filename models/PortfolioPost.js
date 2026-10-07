@@ -9,8 +9,8 @@ const MediaSchema = new mongoose.Schema({
 
 const PortfolioPostSchema = new mongoose.Schema({
   title: { type: String, required: true, trim: true, maxlength: 120 },
-  description: { type: String, default: '', trim: true, maxlength: 5000 },
-  bodyHtml: { type: String, default: '', maxlength: 30000 },
+  description: { type: String, default: '', trim: true, maxlength: 25000 },
+  bodyHtml: { type: String, default: '', maxlength: 150000 },
   category: { type: String, default: '기타', trim: true, maxlength: 40 },
   media: { type: [MediaSchema], default: [] },
   createdAt: { type: Date, default: Date.now },

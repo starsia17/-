@@ -6,9 +6,9 @@
   <meta name="theme-color" content="#f6f5f1">
   <meta name="description" content="사진과 영상으로 기록하는 작업 포트폴리오">
   <title>작업 아카이브 — Portfolio</title>
-  <link rel="icon" type="image/png" sizes="128x128" href="/assets/favicon.png?v=1">
-  <link rel="shortcut icon" type="image/png" href="/assets/favicon.png?v=1">
-  <link rel="apple-touch-icon" href="/assets/favicon.png?v=1">
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg?v=2">
+  <link rel="alternate icon" type="image/svg+xml" href="/assets/favicon.svg?v=2">
+  <link rel="apple-touch-icon" href="/assets/favicon.svg?v=2">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@300;400;500;600;700;800;900&family=Noto+Serif+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -18,7 +18,7 @@
 </head>
 <body>
   <header class="topbar">
-    <a class="wordmark" href="#top" aria-label="작업 아카이브 홈"><img class="brand-logo" src="/assets/site-logo.webp?v=1" alt="ARCHIVE · Portfolio for My Dream"></a>
+    <a class="wordmark" href="#top" aria-label="작업 아카이브 홈"><img class="brand-logo" src="/assets/site-logo.svg?v=2" alt="ARCHIVE · Portfolio for My Dream"></a>
     <nav class="top-nav" aria-label="주요 메뉴">
       <a href="#work">작업물</a>
       <a href="#about">소개</a>
@@ -117,11 +117,11 @@
           <label class="field-group"><span class="field-label">분류</span><select id="categoryInput" name="category"><option>디자인</option><option>사진</option><option>영상</option><option>개발</option><option selected>기타</option></select></label>
           <span class="field-hint">나중에 분류별로 모아볼 수 있어요.</span>
         </div>
-        <label class="field-label" for="editor">본문 <span class="optional">선택</span></label>
+        <label class="field-label" for="editor">본문 <span class="optional">선택 · 최대 25,000자</span></label>
         <div id="composerToolbar" class="editor-toolbar" role="toolbar" aria-label="본문 서식 및 파일 첨부">
           <label class="editor-control font-family-control"><span class="sr-only">글씨체</span><select data-font-family aria-label="글씨체"><option value="Noto Sans KR">고딕 · Noto Sans</option><option value="Noto Serif KR">명조 · Noto Serif</option><option value="Georgia">Georgia</option><option value="Arial">Arial</option><option value="Verdana">Verdana</option><option value="Tahoma">Tahoma</option><option value="Trebuchet MS">Trebuchet MS</option><option value="Courier New">Courier New</option><option value="serif">기본 명조</option><option value="sans-serif">기본 고딕</option><option value="monospace">기본 고정폭</option></select></label>
           <label class="editor-control weight-control"><span class="sr-only">글씨 굵기</span><select data-font-weight aria-label="글씨 굵기"><option value="300">가는 글씨</option><option value="400" selected>보통</option><option value="500">중간</option><option value="600">약간 굵게</option><option value="700">볼드</option><option value="800">아주 굵게</option><option value="900">가장 굵게</option></select></label>
-          <label class="editor-control editor-size-control"><span class="sr-only">글씨 크기</span><input data-font-size type="number" min="12" max="48" step="1" value="16" inputmode="numeric" aria-label="글씨 크기 (12–48px)" title="글씨 크기를 12~48px 사이 숫자로 입력"><span aria-hidden="true">px</span></label>
+          <label class="editor-control editor-size-control"><span class="sr-only">글씨 크기</span><button class="font-size-step" type="button" data-font-step="-1" aria-label="글씨 크기 1px 줄이기">−</button><input data-font-size type="number" min="12" max="48" step="1" value="16" inputmode="numeric" aria-label="글씨 크기 (12–48px)" title="글씨 크기를 12~48px 사이 숫자로 입력"><button class="font-size-step" type="button" data-font-step="1" aria-label="글씨 크기 1px 키우기">+</button><span aria-hidden="true">px</span></label>
           <button type="button" class="editor-button" data-command="bold" aria-label="굵게"><strong>B</strong></button>
           <button type="button" class="editor-button" data-command="italic" aria-label="기울임"><em>I</em></button>
           <button type="button" class="editor-button" data-command="underline" aria-label="밑줄"><u>U</u></button>
@@ -136,11 +136,12 @@
           <button type="button" class="inline-insert-button" data-open-picker="image">사진 넣기</button>
           <button type="button" class="inline-insert-button" data-open-picker="video">동영상 넣기</button>
           <button type="button" class="inline-insert-button" data-open-picker="file">파일 넣기</button>
+          <button type="button" class="inline-insert-button" data-add-video-link>외부 영상 링크</button>
           <input data-file-input="image" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple hidden>
           <input data-file-input="video" type="file" accept="video/mp4,video/webm,video/quicktime" multiple hidden>
           <input data-file-input="file" type="file" multiple hidden>
         </div>
-        <p class="editor-hint">본문에서 넣을 위치를 클릭한 다음 첨부 버튼을 누르세요. 글씨체와 굵기(가는 글씨부터 볼드), 크기(12~48px)를 직접 고를 수 있습니다.</p>
+        <p class="editor-hint">본문에서 넣을 위치를 클릭한 다음 첨부 버튼을 누르세요. 글씨체·굵기·크기를 직접 조절하고 YouTube/Vimeo 링크는 본문에서 바로 재생할 수 있어요. 외부 영상은 서버 저장 공간을 사용하지 않습니다.</p>
         <div id="editor" class="rich-editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="게시물 본문" data-placeholder="무엇을 만들었나요? 아이디어와 과정, 사용한 도구 등을 자유롭게 적어주세요."></div>
         <div id="previewList" class="preview-list" aria-live="polite"></div>
         <p id="existingMediaNotice" class="existing-media-notice" hidden></p>
@@ -152,7 +153,7 @@
     </section>
   </main>
 
-  <footer class="footer"><a class="wordmark" href="#top" aria-label="작업 아카이브 홈"><img class="brand-logo" src="/assets/site-logo.webp?v=1" alt="ARCHIVE · Portfolio for My Dream"></a><span>MADE WITH CURIOSITY · © 2026</span><a href="#top">BACK TO TOP ↑</a></footer>
+  <footer class="footer"><a class="wordmark" href="#top" aria-label="작업 아카이브 홈"><img class="brand-logo" src="/assets/site-logo.svg?v=2" alt="ARCHIVE · Portfolio for My Dream"></a><span>MADE WITH CURIOSITY · © 2026</span><a href="#top">BACK TO TOP ↑</a></footer>
 
   <dialog id="mediaDialog" class="media-dialog" aria-label="미디어 미리보기">
     <button id="closeDialog" class="dialog-close" type="button" aria-label="닫기">×</button>
