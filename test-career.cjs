@@ -36,7 +36,7 @@ const alice='aaaaaaaaaaaaaaaaaaaaaaaa',bob='bbbbbbbbbbbbbbbbbbbbbbbb',postA='111
 const users=model([{_id:alice,careerRevision:0},{_id:bob,careerRevision:0}]);
 const posts=model([{_id:postA,ownerId:alice,title:'디자인 프로젝트',category:'디자인',description:'원본 작업 이야기',bodyHtml:'<p>원본 작업 이야기</p>',media:[],createdAt:new Date(),deletedAt:null}, {_id:postB,ownerId:bob,title:'다른 사용자 작업',category:'기타',description:'private',media:[],deletedAt:null}]);
 const collections=model(),shares=model();
-const app=express();app.use(express.json({limit:'4mb'}));
+const app=express();require('./security').configureSecurity(app);app.use(express.json({limit:'4mb'}));
 const requireUser=(req,res,next)=>{req.user={_id:req.headers['x-fixture-user']||alice};next();};
 require('./career-profile')(app,users,requireUser,sanitizeRichText,plain);
 require('./portfolio-builder')(app,collections,posts,requireUser,p=>p,shares,sanitizeRichText,plain);
@@ -46,6 +46,7 @@ app.get('/api/media/:id',requireUser,(req,res)=>res.type('png').send(fixtureImag
 app.get('/api/auth/session',(req,res)=>res.json({success:true,authenticated:true,user:{id:alice,username:'preview-user',kind:'member',canWriteNews:false}}));
 app.get('/api/posts',requireUser,(req,res)=>res.json({success:true,posts:copy(posts.rows.filter(p=>p.ownerId===req.user._id))}));
 app.get('/api/posts/:id',requireUser,(req,res)=>{const post=posts.rows.find(p=>p._id===req.params.id&&p.ownerId===req.user._id);res.status(post?200:404).json(post?{success:true,post:copy(post)}:{success:false,message:'게시글을 찾을 수 없습니다.'});});
+app.get('/api/account/security',(req,res)=>res.json({success:true,enabled:false,available:false}));
 app.get('/api/account',(req,res)=>res.json({success:true,user:{id:alice,username:'preview-user',kind:'member',createdAt:new Date(),canWriteNews:false},changes:{remaining:2,resetsAt:new Date(Date.now()+86400000)}}));
 app.get('/api/notices',(req,res)=>res.json({success:true,notices:[]}));
 app.get('/api/news',(req,res)=>res.json({success:true,news:[],canWrite:false}));

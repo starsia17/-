@@ -4,17 +4,21 @@
   "description": "사진과 동영상으로 기록하는 MongoDB 포트폴리오",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test:security": "node test-security.cjs",
+    "backup:database": "node scripts/database-backup.cjs backup"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.0.0"
   },
   "dependencies": {
-    "express": "^4.19.2",
-    "mongoose": "^8.4.0",
-    "multer": "^1.4.5-lts.1",
     "dotenv": "^16.4.5",
-    "uuid": "^9.0.1"
+    "express": "^4.19.2",
+    "helmet": "^8.3.0",
+    "mongoose": "^8.4.0",
+    "multer": "^2.4.0",
+    "otplib": "^13.5.0",
+    "qrcode": "^1.5.4",
+    "sanitize-html": "^2.18.0"
   }
 }
-

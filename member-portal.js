@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const scrypt = require('util').promisify(crypto.scrypt);
+const { passwordHash, CURRENT_KDF } = require('./passwords');
 const PERIOD_MS = 14 * 24 * 60 * 60 * 1000;
 function changeWindow(user, now = Date.now()) {
   const anchor = new Date(user.createdAt).getTime();
@@ -19,14 +19,14 @@ module.exports = function mountPortal(app, User, Session, News, auth) {
   app.patch('/api/account', auth.requireUser, auth.rateLimit, async (req, res, next) => {
     if (req.user.kind !== 'member') return res.status(403).json({ success: false, message: '기존 관리자 로그인은 서버에 설정한 관리자 비밀번호를 사용합니다.' });
     try {
-      const user = await User.findById(req.user._id).select('+passwordHash +passwordSalt');
+      const user = await User.findById(req.user._id).select('+passwordHash +passwordSalt +passwordKdf');
       if (!user) return res.status(401).json({ success: false, message: '계정을 찾을 수 없습니다. 다시 로그인해주세요.' });
       const currentPassword = typeof req.body.currentPassword === 'string' ? req.body.currentPassword : '';
       const username = typeof req.body.username === 'string' ? req.body.username.trim().toLowerCase() : user.username;
       const password = typeof req.body.password === 'string' ? req.body.password : '';
       const confirm = typeof req.body.passwordConfirm === 'string' ? req.body.passwordConfirm : '';
       if (!currentPassword || currentPassword.length > 128) return res.status(400).json({ success: false, message: '현재 비밀번호를 입력해주세요.' });
-      const currentHash = (await scrypt(currentPassword, user.passwordSalt, 64)).toString('hex');
+      const currentHash = await passwordHash(currentPassword, user.passwordSalt, user.passwordKdf);
       if (!equal(currentHash, user.passwordHash)) return res.status(400).json({ success: false, message: '현재 비밀번호가 올바르지 않습니다.' });
       if (!/^[a-z0-9][a-z0-9._-]{2,29}$/.test(username)) return res.status(400).json({ success: false, message: '아이디는 영문·숫자로 시작하는 3~30자이며 ., _, -를 사용할 수 있어요.' });
       if ((password && (password.length < 8 || password.length > 128)) || password !== confirm) return res.status(400).json({ success: false, message: '새 비밀번호는 8~128자이며 비밀번호 확인과 일치해야 합니다.' });
@@ -38,7 +38,8 @@ module.exports = function mountPortal(app, User, Session, News, auth) {
       const fields = { username, authVersion: oldVersion + 1, accountChangeWindowStart: quota.windowStartedAt, accountChangeCount: quota.used + 1 };
       if (newPassword) {
         fields.passwordSalt = crypto.randomBytes(16).toString('hex');
-        fields.passwordHash = (await scrypt(password, fields.passwordSalt, 64)).toString('hex');
+        fields.passwordHash = await passwordHash(password, fields.passwordSalt, CURRENT_KDF);
+        fields.passwordKdf = CURRENT_KDF;
       }
       // Version comparison prevents parallel saves from exceeding the quota.
       const query = { _id: user._id, kind: 'member', username: user.username, passwordHash: user.passwordHash };

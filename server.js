@@ -7,7 +7,8 @@ const path = require('path');
 const express = require('express');
 const mongoose = require('mongoose');
 const multer = require('multer');
-const { v4: uuidv4 } = require('uuid');
+const sanitizeHtml = require('sanitize-html');
+const { configureSecurity, verifiedMediaType } = require('./security');
 const PortfolioPost = require('./models/PortfolioPost');
 const PortfolioUser = require('./models/PortfolioUser');
 const PortfolioSession = require('./models/PortfolioSession');
@@ -32,19 +33,12 @@ const inlineMediaTypes = new Set([
 ]);
 
 fs.mkdirSync(TEMP_UPLOAD_DIR, { recursive: true });
-app.set('trust proxy', true);
+configureSecurity(app);
 app.use(express.json({ limit: '4mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
-app.use('/api', (req, res, next) => {
-  res.set('Cache-Control', 'private, no-store');
-  res.set('Vary', 'Cookie, X-Portfolio-Tab');
-  if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.headers.origin) {
-    try {
-      if (new URL(req.headers.origin).host !== req.get('host')) return res.status(403).json({ success: false, message: '허용되지 않은 요청입니다.' });
-    } catch { return res.status(403).json({ success: false, message: '허용되지 않은 요청입니다.' }); }
-  }
-  next();
-});
+app.use(express.static(path.join(__dirname, 'public'), { dotfiles: 'deny' }));
+server.headersTimeout = 20000;
+server.requestTimeout = 300000;
+server.keepAliveTimeout = 5000;
 app.use('/api', async (req, res, next) => {
   if (Date.now() - lastTrashPurgeAt < 60 * 1000) return next();
   lastTrashPurgeAt = Date.now();
@@ -60,13 +54,33 @@ app.get('/api/health', (req, res) => {
 
 const storage = multer.diskStorage({
   destination: (req, file, callback) => callback(null, TEMP_UPLOAD_DIR),
-  filename: (req, file, callback) => callback(null, `${uuidv4()}${path.extname(file.originalname).toLowerCase()}`)
+  filename: (req, file, callback) => callback(null, crypto.randomUUID())
 });
-const upload = multer({
+const uploadParser = multer({
   storage,
-  limits: { fileSize: 50 * 1024 * 1024, files: 10 },
+  limits: { fileSize: 50 * 1024 * 1024, files: 10, fields: 20, parts: 30, fieldSize: 1024 * 1024, fieldNameSize: 100 },
   fileFilter: (req, file, callback) => callback(null, true)
 });
+let activeUploads = 0;
+const uploadingUsers = new Set();
+const upload = {
+  array(field, count) {
+    const parse = uploadParser.array(field, count);
+    return (req, res, next) => {
+      const user = String(req.user._id);
+      if (activeUploads >= 3 || uploadingUsers.has(user)) {
+        res.set('Retry-After', '5');
+        return res.status(429).json({ success: false, message: '업로드가 진행 중입니다. 잠시 후 다시 시도해주세요.' });
+      }
+      ++activeUploads; uploadingUsers.add(user);
+      let released = false;
+      const release = () => { if (!released) { released = true; --activeUploads; uploadingUsers.delete(user); } };
+      res.once('finish', release); res.once('close', release);
+      parse(req, res, next);
+    };
+  }
+};
+
 
 auth.mount(app);
 const requireUser = auth.requireUser;
@@ -201,6 +215,10 @@ app.get('/api/media/:id', requireUser, async (req, res) => {
 app.post('/api/posts', requireUser, upload.array('media', 10), async (req, res) => {
   const uploadedIds = [];
   try {
+    if (['title', 'category', 'bodyHtml'].some(key => req.body[key] !== undefined && typeof req.body[key] !== 'string')) {
+      await cleanupTempFiles(req.files);
+      return res.status(400).json({ success: false, message: '입력 형식이 올바르지 않습니다.' });
+    }
     const title = (req.body.title || '').trim();
     const category = (req.body.category || '기타').trim();
     if (!title) {
@@ -246,6 +264,10 @@ app.put('/api/posts/:id', requireUser, upload.array('media', 10), async (req, re
     if (!post) {
       await cleanupTempFiles(req.files);
       return res.status(404).json({ success: false, message: '수정할 게시물을 찾을 수 없습니다.' });
+    }
+    if (['title', 'category', 'bodyHtml'].some(key => req.body[key] !== undefined && typeof req.body[key] !== 'string')) {
+      await cleanupTempFiles(req.files);
+      return res.status(400).json({ success: false, message: '입력 형식이 올바르지 않습니다.' });
     }
     const title = (req.body.title || '').trim();
     const category = (req.body.category || '기타').trim();
@@ -307,9 +329,11 @@ function createInlineMediaMap(rawDescriptors, uploadedMedia) {
 }
 
 async function storeMediaFile(file, uploadedIds) {
-  const type = !inlineMediaTypes.has(file.mimetype) ? 'file' : file.mimetype.startsWith('video/') ? 'video' : 'image';
+  const contentType = await verifiedMediaType(file);
+  const originalName = path.basename(file.originalname.replace(/\\/g, '/')).replace(/[\x00-\x1f\x7f]/g, '').slice(0, 200) || 'download';
+  const type = !inlineMediaTypes.has(contentType) ? 'file' : contentType.startsWith('video/') ? 'video' : 'image';
   const stream = mediaBucket.openUploadStream(file.filename, {
-    metadata: { contentType: file.mimetype, kind: type, originalName: file.originalname }
+    metadata: { contentType, kind: type, originalName }
   });
   uploadedIds.push(stream.id);
   const completed = new Promise((resolve, reject) => {
@@ -334,7 +358,7 @@ async function storeMediaFile(file, uploadedIds) {
   return {
     fileId: stream.id,
     type,
-    name: file.originalname,
+    name: originalName,
     size: file.size
   };
 }
@@ -371,47 +395,42 @@ async function cleanupExpiredMediaOrphans() {
 const richTextTags = new Set(['p', 'div', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'ul', 'ol', 'li', 'blockquote', 'h1', 'h2', 'h3', 'span', 'figure', 'figcaption', 'img', 'video', 'a']);
 
 function sanitizeRichText(input, inlineMedia = new Map(), allowedMedia = new Set()) {
-  const source = String(input).slice(0, 160000)
-    .replace(/<(script|style|iframe|object|svg|math|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
-    .replace(/<!--[\s\S]*?-->/g, '');
-  let output = '';
-  const tokens = source.match(/<\/?[a-z][^>]*>|[^<]+|</gi) || [];
-  for (const token of tokens) {
-    const match = /^<\s*(\/?)\s*([a-z][\w-]*)\b([^>]*)>/i.exec(token);
-    if (!match) { output += escapeHtml(decodeBasicEntities(token)); continue; }
-    const closing = Boolean(match[1]);
-    const tag = match[2].toLowerCase();
-    if (!richTextTags.has(tag)) continue;
-    if (closing) { if (tag !== 'br') output += `</${tag}>`; continue; }
-    const attrs = match[3];
-    const attribute = name => {
-      const found = new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i').exec(attrs);
-      return found ? (found[1] ?? found[2] ?? found[3] ?? '') : '';
-    };
-    const uploadToken = attribute('data-upload-token');
-    const uploaded = inlineMedia.get(uploadToken);
-    const styleMatch = /\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(attrs);
-    const style = styleMatch ? sanitizeEditorStyle(styleMatch[1] ?? styleMatch[2]) : '';
-    let safeAttributes = style ? ` style="${escapeHtml(style)}"` : '';
-    if (tag === 'img' || tag === 'video') {
-      const expectedType = tag === 'img' ? 'image' : 'video';
-      const src = uploaded?.type === expectedType ? `/api/media/${uploaded.fileId}` : attribute('src');
-      if (!/^\/api\/media\/[a-f\d]{24}$/i.test(src) || !allowedMedia.has(src.split('/').pop())) continue;
-      safeAttributes += ` src="${src}"`;
-      if (tag === 'img') safeAttributes += ` alt="${escapeHtml(uploaded?.name || attribute('alt').slice(0, 200))}" loading="lazy"`;
-      else safeAttributes += ' controls playsinline preload="metadata"';
-    }
-    if (tag === 'a') {
-      const href = uploaded?.type === 'file' ? `/api/media/${uploaded.fileId}` : attribute('href');
-      if (/^\/api\/media\/[a-f\d]{24}$/i.test(href) && allowedMedia.has(href.split('/').pop())) safeAttributes += ` href="${href}" download`;
-      else {
-        try { const external = new URL(href); if (external.protocol !== 'https:') continue; safeAttributes += ` href="${escapeHtml(external.href)}" target="_blank" rel="noopener noreferrer"`; }
-        catch { continue; }
+  return sanitizeHtml(String(input).slice(0, 160000), {
+    allowedTags: [...richTextTags],
+    allowedAttributes: { '*': ['style'], img: ['src', 'alt', 'loading'], video: ['src', 'controls', 'playsinline', 'preload'], a: ['href', 'target', 'rel', 'download'] },
+    allowedSchemes: ['https'], allowProtocolRelative: false,
+    // Styles are normalized by our existing editor whitelist before serialization.
+    parseStyleAttributes: false,
+    nonTextTags: ['script', 'style', 'textarea', 'option', 'iframe', 'object', 'svg', 'math', 'template'],
+    transformTags: {
+      '*': (tag, attrs) => {
+        const style = sanitizeEditorStyle(attrs.style || '');
+        const safe = style ? { style } : {};
+        const uploaded = inlineMedia.get(attrs['data-upload-token']);
+        if (tag === 'img' || tag === 'video') {
+          const expected = tag === 'img' ? 'image' : 'video';
+          const src = uploaded?.type === expected ? `/api/media/${uploaded.fileId}` : attrs.src || '';
+          if (/^\/api\/media\/[a-f\d]{24}$/i.test(src) && allowedMedia.has(src.split('/').pop())) {
+            safe.src = src;
+            if (tag === 'img') { safe.alt = (uploaded?.name || attrs.alt || '').slice(0, 200); safe.loading = 'lazy'; }
+            else { safe.controls = ''; safe.playsinline = ''; safe.preload = 'metadata'; }
+          }
+        }
+        if (tag === 'a') {
+          const href = uploaded?.type === 'file' ? `/api/media/${uploaded.fileId}` : attrs.href || '';
+          if (/^\/api\/media\/[a-f\d]{24}$/i.test(href) && allowedMedia.has(href.split('/').pop())) { safe.href = href; safe.download = ''; }
+          else {
+            try {
+              const url = new URL(href);
+              if (url.protocol === 'https:' && !url.username && !url.password) { safe.href = url.href; safe.target = '_blank'; safe.rel = 'noopener noreferrer'; }
+            } catch {}
+          }
+        }
+        return { tagName: tag, attribs: safe };
       }
-    }
-    output += `<${tag}${safeAttributes}>`;
-  }
-  return output;
+    },
+    exclusiveFilter: frame => ['img', 'video'].includes(frame.tag) && !frame.attribs.src
+  });
 }
 
 function sanitizeEditorStyle(raw) {
@@ -450,9 +469,11 @@ function plainTextFromHtml(html) {
 
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
-  const status = err instanceof multer.MulterError ? 400 : 500;
-  let message = status >= 500 ? '요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.' : err.message;
+  const status = err.code === 'PASSWORD_BUSY' ? 429 : err instanceof multer.MulterError ? (err.code === 'LIMIT_FILE_SIZE' ? 413 : 400) : ['entity.too.large'].includes(err.type) ? 413 : err.type === 'entity.parse.failed' ? 400 : err.status === 503 ? 503 : 500;
+  let message = status === 413 ? '요청이 허용 크기를 초과했습니다.' : status === 400 ? '입력 형식이나 첨부 제한을 확인해주세요.' : '요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.';
   if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') message = '파일당 최대 크기는 50MB입니다.';
+  if (err.status === 503 || err.code === 'PASSWORD_BUSY') message = err.message;
+  if (status === 429) res.set('Retry-After', '3');
   if (req.path.startsWith('/api/')) return res.status(status).json({ success: false, message });
   res.status(status).send(message);
 });
