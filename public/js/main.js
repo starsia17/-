@@ -154,11 +154,7 @@ function createPostCard(post, index) {
         player.autoplay = true;
       }
       // Only one archive preview plays at a time.
-      postGrid.querySelectorAll('.external-video-cover iframe, .external-video-cover video').forEach(node => {
-        if (node.tagName === 'VIDEO') node.pause();
-        const original = node.parentElement._videoCover;
-        if (original) node.replaceWith(original);
-      });
+      stopArchiveVideoPreviews();
       media._videoCover = cover; media.replaceChildren(player);
       if (player.tagName === 'VIDEO') player.play().catch(() => {});
     });
@@ -628,6 +624,7 @@ function syncPageFromHash() {
   const isDetail = hash.startsWith('post/');
   const isTrash = hash === 'trash';
   const isComposer = hash === 'write';
+  if (isDetail || isTrash || isComposer) stopArchiveVideoPreviews();
   document.querySelectorAll('main > section:not(.page-view)').forEach(section => { section.hidden = isDetail || isTrash || isComposer; });
   detailView.hidden = !isDetail;
   trashSection.hidden = !isTrash;
@@ -661,6 +658,13 @@ function findExternalVideo(html) {
     } catch {}
   }
   return null;
+}
+function stopArchiveVideoPreviews() {
+  postGrid.querySelectorAll('.external-video-cover iframe, .external-video-cover video').forEach(node => {
+    if (node.tagName === 'VIDEO') node.pause();
+    const original = node.parentElement._videoCover;
+    if (original) node.replaceWith(original);
+  });
 }
 function askVideoLink() {
   const modal = document.querySelector('#videoLinkDialog');
