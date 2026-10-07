@@ -1,7 +1,7 @@
 .wordmark {
   flex: 0 0 auto;
-  width: 126px;
-  height: 58px;
+  width: 210px;
+  height: 40px;
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
@@ -17,26 +17,25 @@
 }
 
 .footer .wordmark {
-  width: 120px;
-  height: 54px;
+  width: 210px;
+  height: 38px;
 }
 
 @media (max-width: 760px) {
   .topbar .wordmark {
-    width: 98px;
-    height: 45px;
+    width: 146px;
+    height: 40px;
   }
 
   .footer .wordmark {
-    width: 108px;
-    height: 49px;
+    width: 140px;
+    height: 36px;
   }
 }
 
 @media (max-width: 420px) {
   .topbar .wordmark {
-    width: 86px;
-    height: 40px;
+    width: 124px;
+    height: 36px;
   }
 }
-
