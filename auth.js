@@ -35,6 +35,7 @@ module.exports = function createAuth(User, Session, adminPassword = '') {
     const user = await User.findById(session.userId);
     if (!user) return null;
     if ((session.authVersion || 0) !== (user.authVersion || 0)) return null;
+    if (user.mfaEnabled && session.mfaVerified !== true) return null;
     await Session.updateOne({ _id: session._id }, { $set: { lastSeenAt: new Date(now), expiresAt: new Date(now + IDLE_MS) } });
     req.user = user; req.authSession = session;
     return user;
@@ -51,7 +52,7 @@ module.exports = function createAuth(User, Session, adminPassword = '') {
     const old = cookieToken(req);
     if (old) await Session.deleteOne({ tokenHash: digest(old) });
     const token = crypto.randomBytes(32).toString('hex');
-    await Session.create({ tokenHash: digest(token), userId: user._id, tabHash: digest(tab), remember: req.body.remember === true, authVersion: user.authVersion || 0, lastSeenAt: new Date(), expiresAt: new Date(Date.now() + IDLE_MS) });
+    await Session.create({ tokenHash: digest(token), userId: user._id, tabHash: digest(tab), remember: req.body.remember === true, mfaVerified: user.mfaEnabled === true, authVersion: user.authVersion || 0, lastSeenAt: new Date(), expiresAt: new Date(Date.now() + IDLE_MS) });
     setCookie(res, token);
     res.json({ success: true, user: publicUser(user), remember: req.body.remember === true });
   }

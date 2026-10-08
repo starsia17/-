@@ -437,6 +437,7 @@ function wireEditorToolbar(toolbar, target, queue, queueChanged, existingMediaCo
   };
   modeNav.querySelectorAll('button').forEach(button => button.addEventListener('click', () => updateMode(button.dataset.editorModeButton)));
   updateMode('type');
+  window.portfolioVideoPosition.mount(toolbar, target);
   target.addEventListener('focusin', () => { activeRichEditor = target; lockedSelections.delete(target); });
   toolbar.addEventListener('pointerdown', event => {
     const selection = window.getSelection();
@@ -510,11 +511,11 @@ function wireEditorToolbar(toolbar, target, queue, queueChanged, existingMediaCo
   toolbar.querySelector('[data-add-video-link]')?.addEventListener('click', async () => {
     const value = await askVideoLink(); if (!value || !isAuthenticated || !document.contains(target)) return;
     let url; try { url = new URL(value.trim()); } catch { window.alert('올바른 동영상 주소를 입력해주세요.'); return; }
-    if (url.protocol !== 'https:') { window.alert('보안을 위해 https 주소만 첨부할 수 있어요.'); return; }
+    if (url.protocol !== 'https:' || url.username || url.password) { window.alert('보안을 위해 https 주소만 첨부할 수 있어요.'); return; }
     const range = restoreEditorSelection(target); if (!range) { window.alert('링크를 넣을 본문 위치를 먼저 눌러주세요.'); return; }
     const link = document.createElement('a'); link.href = url.href; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = `▶ 외부 동영상 보기 (${url.hostname})`;
-    range.deleteContents(); range.insertNode(link); const next = document.createRange(); next.setStartAfter(link); next.collapse(true);
-    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(next); savedEditorRanges.set(target, next.cloneRange());
+    window.portfolioVideoPosition.insert(target, range, link);
+    savedEditorRanges.set(target, window.getSelection().getRangeAt(0).cloneRange());
   });
   toolbar.querySelectorAll('[data-open-picker]').forEach(button => button.addEventListener('click', () => {
     toolbar.querySelector(`[data-file-input="${button.dataset.openPicker}"]`)?.click();
@@ -712,9 +713,12 @@ function askVideoLink() {
 }
 function renderExternalVideoLinks(article) {
   article.querySelectorAll('a[href]').forEach(link => {
-    const src = externalVideoEmbedUrl(link.href); if (!src) return;
+    const src = externalVideoEmbedUrl(link.href);
+    const direct = /^https:\/\//i.test(link.href) && /\.(mp4|webm|mov)$/i.test(new URL(link.href).pathname);
+    if (!src && !direct) return;
     const figure = document.createElement('figure'); figure.className = 'external-video-embed'; figure.dataset.videoUrl = link.href;
-    const frame = document.createElement('iframe'); frame.src = src; frame.title = link.textContent.trim() || '외부 동영상';
+    const frame = document.createElement(src ? 'iframe' : 'video'); frame.src = src || link.href; frame.title = link.textContent.trim() || '외부 동영상';
+    if (!src) { frame.controls = true; frame.playsInline = true; frame.preload = 'metadata'; }
     frame.loading = 'lazy'; frame.referrerPolicy = 'strict-origin-when-cross-origin';
     frame.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share'; frame.allowFullscreen = true;
     figure.append(frame); link.replaceWith(figure);

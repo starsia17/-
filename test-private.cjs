@@ -95,6 +95,14 @@ const legacyId='aaaaaaaaaaaaaaaaaaaaaaaa', foreignFile='bbbbbbbbbbbbbbbbbbbbbbbb
     assert.equal((await call('/api/posts/'+id,administrator)).status,404);
     const sanitized=sanitizeRichText('<img src="/api/media/'+foreignFile+'"><a href="/api/media/'+foreignFile+'">file</a><script>alert(1)</script>');
     assert.ok(!sanitized.includes('/api/media/'));assert.ok(!sanitized.includes('<script'));
+    const videoForm = new FormData(); videoForm.set('title','동영상 위치 저장');
+    videoForm.set('bodyHtml','<figure data-external-video="true" style="text-align:right"><a href="https://youtu.be/dQw4w9WgXcQ">첫 영상</a></figure><p>사이 글</p><figure data-external-video="true" style="text-align:left"><a href="https://vimeo.com/123456789">둘째 영상</a></figure>');
+    const videoMade = await call('/api/posts',{...alice,method:'POST',body:videoForm}); assert.equal(videoMade.status,201);
+    const videoEdit = new FormData(); videoEdit.set('title','동영상 위치 저장'); videoEdit.set('bodyHtml','<figure data-external-video="true" style="text-align:left"><a href="https://vimeo.com/123456789">둘째 영상</a></figure><p>사이 글</p><figure data-external-video="true" style="text-align:right"><a href="https://youtu.be/dQw4w9WgXcQ">첫 영상</a></figure>');
+    assert.equal((await call('/api/posts/'+videoMade.data.post._id,{...alice,method:'PUT',body:videoEdit})).status,200);
+    const videoSaved = (await call('/api/posts/'+videoMade.data.post._id,alice)).data.post.bodyHtml;
+    assert.ok(videoSaved.indexOf('둘째 영상') < videoSaved.indexOf('사이 글') && videoSaved.indexOf('사이 글') < videoSaved.indexOf('첫 영상'));
+    assert.match(videoSaved,/data-external-video="true"/); assert.match(videoSaved,/text-align:right/);
     stores.Session.find(x=>x.userId===stores.User[2]._id).lastSeenAt=new Date(Date.now()-31*60000);
     assert.equal((await call('/api/posts',bob)).status,401);
     assert.equal((await call('/api/auth/logout',{...alice,method:'POST'})).status,200);

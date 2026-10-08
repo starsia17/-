@@ -49,7 +49,7 @@ module.exports = function createMfa(User, Session, auth) {
     return true;
   }
   async function invalidateSessions(req, updated) {
-    await Session.updateOne({ _id: req.authSession._id, userId: req.user._id }, { $set: { authVersion: updated.authVersion, mfaSetupSecret: null, mfaSetupExpiresAt: null } });
+    await Session.updateOne({ _id: req.authSession._id, userId: req.user._id }, { $set: { authVersion: updated.authVersion, mfaVerified: updated.mfaEnabled === true, mfaSetupSecret: null, mfaSetupExpiresAt: null } });
     // authVersion invalidates every other session even if deletion temporarily fails.
     await Session.deleteMany({ userId: req.user._id, _id: { $ne: req.authSession._id } });
   }

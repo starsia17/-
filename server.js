@@ -397,7 +397,7 @@ const richTextTags = new Set(['p', 'div', 'br', 'strong', 'b', 'em', 'i', 'u', '
 function sanitizeRichText(input, inlineMedia = new Map(), allowedMedia = new Set()) {
   return sanitizeHtml(String(input).slice(0, 160000), {
     allowedTags: [...richTextTags],
-    allowedAttributes: { '*': ['style'], img: ['src', 'alt', 'loading'], video: ['src', 'controls', 'playsinline', 'preload'], a: ['href', 'target', 'rel', 'download'] },
+    allowedAttributes: { '*': ['style'], figure: ['style', 'data-external-video'], img: ['src', 'alt', 'loading'], video: ['src', 'controls', 'playsinline', 'preload'], a: ['href', 'target', 'rel', 'download'] },
     allowedSchemes: ['https'], allowProtocolRelative: false,
     // Styles are normalized by our existing editor whitelist before serialization.
     parseStyleAttributes: false,
@@ -406,6 +406,7 @@ function sanitizeRichText(input, inlineMedia = new Map(), allowedMedia = new Set
       '*': (tag, attrs) => {
         const style = sanitizeEditorStyle(attrs.style || '');
         const safe = style ? { style } : {};
+        if (tag === 'figure' && attrs['data-external-video'] === 'true') safe['data-external-video'] = 'true';
         const uploaded = inlineMedia.get(attrs['data-upload-token']);
         if (tag === 'img' || tag === 'video') {
           const expected = tag === 'img' ? 'image' : 'video';

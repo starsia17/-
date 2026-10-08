@@ -23,9 +23,11 @@
       if (e.tagName === 'VIDEO') { e.controls = true; e.playsInline = true; e.preload = 'metadata'; }
     });
     article.querySelectorAll('a[href]').forEach(link => {
-      const src = embed(link.href); if (!src) return;
-      const figure = node('figure', undefined, 'external-video-embed'), frame = node('iframe');
-      frame.src = src; frame.loading = 'lazy'; frame.title = '외부 동영상'; frame.referrerPolicy = 'no-referrer'; frame.allowFullscreen = true; figure.append(frame); link.replaceWith(figure);
+      const src = embed(link.href);
+      const direct = /^https:\/\//i.test(link.href) && /\.(mp4|webm|mov)$/i.test(new URL(link.href).pathname);
+      if (!src && !direct) return;
+      const figure = node('figure', undefined, 'external-video-embed'), frame = node(src ? 'iframe' : 'video');
+      frame.src = src || link.href; if (!src) { frame.controls = true; frame.playsInline = true; frame.preload = 'metadata'; } frame.loading = 'lazy'; frame.title = '외부 동영상'; frame.referrerPolicy = 'no-referrer'; frame.allowFullscreen = true; figure.append(frame); link.replaceWith(figure);
     }); root.append(article);
     const media = node('div', undefined, 'detail-media-list');
     (post.media || []).filter(item => !used.has(item.url)).forEach(item => {

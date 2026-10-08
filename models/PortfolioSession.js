@@ -5,6 +5,7 @@ const schema = new mongoose.Schema({
   tabHash: { type: String, required: true },
   mfaSetupSecret: { type: String, select: false },
   mfaSetupExpiresAt: { type: Date },
+  mfaVerified: { type: Boolean, default: false },
   remember: { type: Boolean, default: false },
   authVersion: { type: Number, default: 0 },
   lastSeenAt: { type: Date, required: true },

@@ -106,6 +106,7 @@ app.get('/fixture/rate', createRateLimit({ limit: 2 }), (req, res) => res.json({
     assert.ok(!JSON.stringify(stores.User).includes(secret)); assert.ok(!JSON.stringify(stores.User).includes(enabled.data.recoveryCodes[0].replace(/-/g, '')));
     assert.equal((await login('alice')).status, 401);
     assert.equal((await login('alice', 'wrong')).status, 401);
+    assert.equal((await call('/api/auth/login',{method:'POST',body:{username:'alice',password:'fixture-secure-pass',tabToken:crypto.randomUUID(),remember:true}})).status,401);
     // The enrollment code has already been consumed.
     assert.equal((await login('alice', generateSync({ secret }))).status, 401);
     const future = generateSync({ secret, epoch: Math.floor(Date.now() / 1000) + 30 });
@@ -114,6 +115,9 @@ app.get('/fixture/rate', createRateLimit({ limit: 2 }), (req, res) => res.json({
     const recovery = enabled.data.recoveryCodes[0];
     const recovered = await login('alice', recovery); assert.equal(recovered.status, 200); assert.equal((await login('alice', recovery)).status, 401);
     assert.equal((await call('/api/account/security', recovered)).data.enabled, true);
+    const proof = stores.Session.find(x => x.tokenHash === crypto.createHash('sha256').update(recovered.cookie.split('=')[1]).digest('hex'));
+    proof.mfaVerified = false; assert.equal((await call('/api/posts',recovered)).status,401);
+    proof.mfaVerified = true;
     assert.equal((await call('/api/account/security', bob)).data.enabled, false);
     const disabled = await call('/api/account/security/disable', { ...recovered, method: 'POST', body: { password: 'fixture-secure-pass', code: enabled.data.recoveryCodes[1] } });
     assert.equal(disabled.status, 200); assert.equal((await call('/api/posts', races.find(x => x.status === 200))).status, 401);
