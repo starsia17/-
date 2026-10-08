@@ -22,8 +22,13 @@ function configureSecurity(app) {
   }));
   app.use((req, res, next) => {
     res.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
+    if (req.originalUrl.length > 4096) return res.status(414).send('요청 주소가 너무 깁니다.');
     next();
   });
+  // Apply before JSON parsing and database lookups. Static assets remain separately cacheable.
+  app.use('/api', createRateLimit({ limit: 600, windowMs: 60000 }));
+  app.use('/api', createRateLimit({ limit: 100, windowMs: 1000, maxKeys: 1, key: () => 'instance' }));
+  app.use('/api', createConcurrencyLimit(40));
   app.use('/api', (req, res, next) => {
     res.set('Cache-Control', 'private, no-store');
     res.vary('Cookie'); res.vary('X-Portfolio-Tab');
@@ -38,6 +43,20 @@ function configureSecurity(app) {
     }
     next();
   });
+}
+
+function createConcurrencyLimit(limit) {
+  let active = 0;
+  return (req, res, next) => {
+    if (active >= limit) {
+      res.set('Retry-After', '2');
+      return res.status(503).json({ success: false, message: '접속 요청이 많습니다. 잠시 후 다시 시도해주세요.' });
+    }
+    ++active;
+    let released = false;
+    const release = () => { if (!released) { released = true; --active; } };
+    res.once('finish', release); res.once('close', release); next();
+  };
 }
 
 function forbidden(res) { return res.status(403).json({ success: false, message: '허용되지 않은 요청입니다.' }); }
@@ -84,4 +103,4 @@ async function verifiedMediaType(file) {
   return detected;
 }
 
-module.exports = { configureSecurity, createRateLimit, verifiedMediaType, production };
+module.exports = { configureSecurity, createRateLimit, createConcurrencyLimit, verifiedMediaType, production };

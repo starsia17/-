@@ -51,7 +51,9 @@ for (const [file, name] of [['PortfolioUser', 'User'], ['PortfolioSession', 'Ses
   const filePath = require.resolve('./models/' + file); require.cache[filePath] = { id: filePath, filename: filePath, loaded: true, exports: model(name) };
 }
 const { app, auth, sanitizeRichText } = require('./server');
-const { createRateLimit, verifiedMediaType } = require('./security');
+const { createRateLimit, createConcurrencyLimit, verifiedMediaType } = require('./security');
+let releaseHeld, signalHeld; const heldReady = new Promise(resolve => { signalHeld = resolve; });
+app.get('/fixture/concurrency', createConcurrencyLimit(1), (req, res) => { signalHeld(); releaseHeld = () => res.json({success:true}); });
 app.get('/fixture/rate', createRateLimit({ limit: 2 }), (req, res) => res.json({ success: true }));
 
 (async () => {
@@ -83,6 +85,9 @@ app.get('/fixture/rate', createRateLimit({ limit: 2 }), (req, res) => res.json({
       assert.ok(!r.headers.get('content-security-policy').includes("script-src 'self' 'unsafe-inline'"));
     }
     assert.equal((await call('/.env')).status, 404);
+    assert.equal((await call('/'+'a'.repeat(4100))).status,414);
+    const held = call('/fixture/concurrency'); await heldReady;
+    assert.equal((await call('/fixture/concurrency')).status,503); releaseHeld(); assert.equal((await held).status,200);
     const cross = await call('/api/auth/register', { method: 'POST', headers: { 'Sec-Fetch-Site': 'cross-site' }, body: {} }); assert.equal(cross.status, 403);
     for (const origin of ['null', 'https://evil.example', base.replace('http:', 'https:'), base + '/wrong']) {
       assert.equal((await call('/api/auth/register', { method: 'POST', headers: { Origin: origin }, body: {} })).status, 403);
@@ -112,6 +117,8 @@ app.get('/fixture/rate', createRateLimit({ limit: 2 }), (req, res) => res.json({
     const future = generateSync({ secret, epoch: Math.floor(Date.now() / 1000) + 30 });
     const races = await Promise.all([login('alice', future), login('alice', future)]);
     assert.deepEqual(races.map(x => x.status).sort(), [200, 401]);
+    const memberRow = stores.User.find(x => x.username === 'alice'); memberRow.mfaEnabled = false;
+    assert.equal((await login('alice')).status,401);
     const recovery = enabled.data.recoveryCodes[0];
     const recovered = await login('alice', recovery); assert.equal(recovered.status, 200); assert.equal((await login('alice', recovery)).status, 401);
     assert.equal((await call('/api/account/security', recovered)).data.enabled, true);
@@ -128,7 +135,14 @@ app.get('/fixture/rate', createRateLimit({ limit: 2 }), (req, res) => res.json({
     const adminSetup = await call('/api/account/security/setup', { ...admin, method: 'POST', body: { password: 'security-fixture-admin' } }); assert.equal(adminSetup.status, 200);
     const adminEnabled = await call('/api/account/security/confirm', { ...admin, method: 'POST', body: { code: generateSync({ secret: adminSetup.data.secret }) } }); assert.equal(adminEnabled.status, 200);
     assert.equal((await login('', undefined, true)).status, 401);
+    // Regression: an enrolled key with a missing/false flag previously bypassed login MFA.
+    const adminRow = stores.User.find(x => x.kind === 'admin'); adminRow.mfaEnabled = false;
+    const rejected = await login('', undefined, true); assert.equal(rejected.status,401); assert.equal(rejected.cookie,undefined);
+    assert.equal((await login('', '123abc', true)).status,401);
     assert.equal((await login('', adminEnabled.data.recoveryCodes[0], true)).status, 200);
+    const isolatedMfa = require('./mfa')(require('./models/PortfolioUser'),require('./models/PortfolioSession'),{});
+    for (let i=0;i<10;i++) assert.equal(await isolatedMfa.verify({...adminRow},'invalid'),false);
+    await assert.rejects(isolatedMfa.verify({...adminRow},'invalid'),e=>e.code==='MFA_RATE_LIMITED');
     process.env.RENDER = 'true';
     const secure = await login('bob'); assert.equal(secure.status, 200); assert.match(secure.responseHeaders.get('set-cookie'), /; Secure/); delete process.env.RENDER;
     const mediaId = 'aaaaaaaaaaaaaaaaaaaaaaaa';

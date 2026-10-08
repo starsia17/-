@@ -20,6 +20,7 @@ function decrypt(value, ownerId) {
   cipher.setAAD(Buffer.from(String(ownerId))); cipher.setAuthTag(tag);
   return Buffer.concat([cipher.update(data), cipher.final()]).toString('utf8');
 }
+function requiresMfa(user) { return !!user && (user.mfaEnabled === true || (typeof user.mfaSecret === 'string' && user.mfaSecret.length > 0)); }
 function validCode(code) { return typeof code === 'string' && /^\d{6}$/.test(code); }
 function codeStep(code, secret) {
   if (!validCode(code)) return null;
@@ -28,19 +29,34 @@ function codeStep(code, secret) {
 }
 
 module.exports = function createMfa(User, Session, auth) {
+  const attempts = new Map(); let lastSweep = 0;
+  function reserveAttempt(id) {
+    const now = Date.now();
+    if (now - lastSweep > 60000) { for (const [key, value] of attempts) if (value.until <= now) attempts.delete(key); lastSweep = now; }
+    const previous = attempts.get(id);
+    const value = previous && previous.until > now ? previous : { count: 0, until: now + 10 * 60000 };
+    if (value.count >= 10 || (!previous && attempts.size >= 10000)) throw Object.assign(Error('인증 시도가 많습니다. 10분 후 다시 시도해주세요.'), { code: 'MFA_RATE_LIMITED' });
+    ++value.count; attempts.set(id, value);
+  }
   async function verify(user, code) {
-    if (!user.mfaEnabled) return true;
+    // Always read persisted enrollment; projected or stale flags must never bypass MFA.
     // Atomic consumption prevents concurrent login/disable requests from replaying a code.
     const stored = await User.findById(user._id).select('+mfaSecret +mfaRecoveryHashes');
-    if (!stored?.mfaEnabled || !stored.mfaSecret) return false;
+    if (!stored || (stored.authVersion || 0) !== (user.authVersion || 0)) return false;
+    const required = requiresMfa(stored);
+    user.mfaEnabled = required;
+    if (!required) return true;
+    const identity = String(stored._id); reserveAttempt(identity);
+    const accept = result => { if (result) attempts.delete(identity); return !!result; };
+    if (!stored.mfaSecret) return false;
     const normalized = typeof code === 'string' ? code.replace(/-/g, '').toLowerCase() : '';
     if (/^[a-f\d]{32}$/.test(normalized)) {
       const recoveryHash = hash(normalized);
-      return !!await User.findOneAndUpdate({ _id: user._id, mfaEnabled: true, mfaRecoveryHashes: recoveryHash }, { $pull: { mfaRecoveryHashes: recoveryHash } });
+      return accept(await User.findOneAndUpdate({ _id: user._id, mfaSecret: stored.mfaSecret, authVersion: stored.authVersion || 0, mfaRecoveryHashes: recoveryHash }, { $set: { mfaEnabled: true }, $pull: { mfaRecoveryHashes: recoveryHash } }));
     }
     const step = codeStep(code, decrypt(stored.mfaSecret, user._id));
     if (step === null) return false;
-    return !!await User.findOneAndUpdate({ _id: user._id, mfaEnabled: true, mfaLastStep: { $lt: step } }, { $set: { mfaLastStep: step } });
+    return accept(await User.findOneAndUpdate({ _id: user._id, mfaSecret: stored.mfaSecret, authVersion: stored.authVersion || 0, mfaLastStep: { $lt: step } }, { $set: { mfaLastStep: step, mfaEnabled: true } }));
   }
   async function passwordGate(req, res) {
     if (!await auth.verifyPassword(req.user, req.body.password)) {
@@ -102,3 +118,5 @@ module.exports = function createMfa(User, Session, auth) {
 module.exports.encrypt = encrypt;
 module.exports.decrypt = decrypt;
 module.exports.codeStep = codeStep;
+
+module.exports.requiresMfa = requiresMfa;

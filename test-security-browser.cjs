@@ -39,6 +39,25 @@ const { generateSync } = require('otplib');
       await security.getByRole('button', { name: '2단계 인증 해제', exact: true }).waitFor();
       await security.locator('input[type=password]').fill('fixture-browser-pass'); await security.locator('input[autocomplete=one-time-code]').fill(recoveryCodes[1]);
       await security.getByRole('button', { name: '2단계 인증 해제', exact: true }).click(); await security.getByRole('button', { name: '인증 앱 연결 시작', exact: true }).waitFor();
+      if (width === 390) {
+        await page.evaluate(async () => { await window.portfolioAuth.fetch('/api/auth/logout',{method:'POST'}); window.portfolioAuth.expire(); });
+        await page.locator('[data-auth-view-button="admin"]').click();
+        await page.locator('#ownerPassword').fill('security-fixture-admin'); await page.locator('#adminLoginForm button[type=submit]').click();
+        await page.locator('#authScreen').waitFor({state:'hidden'}); await page.evaluate(() => { location.hash='mypage/account'; });
+        await security.getByRole('button',{name:'인증 앱 연결 시작',exact:true}).waitFor();
+        await security.locator('input[type=password]').fill('security-fixture-admin'); await security.getByRole('button',{name:'인증 앱 연결 시작',exact:true}).click();
+        const adminSecret = await security.locator('code').textContent();
+        await security.locator('input[autocomplete=one-time-code]').fill(generateSync({secret:adminSecret}));
+        await security.getByRole('button',{name:'코드 확인하고 2단계 인증 켜기'}).click(); await security.locator('textarea').waitFor();
+        const adminRecovery = (await security.locator('textarea').inputValue()).split('\n');
+        await page.evaluate(async () => { await window.portfolioAuth.fetch('/api/auth/logout',{method:'POST'}); window.portfolioAuth.expire(); });
+        await page.locator('#ownerPassword').fill('security-fixture-admin'); await page.locator('#adminLoginForm button[type=submit]').click();
+        await page.locator('#adminLoginForm .auth-error').waitFor({state:'visible'}); assert.match(await page.locator('#adminLoginForm .auth-error').textContent(),/2단계/);
+        assert.equal(await page.evaluate(() => window.portfolioAuth.user),null); assert.equal(await page.locator('#adminSecondFactor').evaluate(e=>e.required),true);
+        await page.locator('#adminSecondFactor').fill(adminRecovery[0]); await page.locator('#adminLoginForm button[type=submit]').click();
+        await page.locator('#authScreen').waitFor({state:'hidden'});
+        console.log('PASS admin browser: enrolled administrator logout, password-only denial, required second factor and recovery login');
+      }
       // The enforced CSP blocks event handlers and injected inline scripts in the real browser.
       await page.evaluate(() => { const el = document.createElement('div'); el.innerHTML = '<img src=/invalid onerror="window.securityExecuted=true">'; document.body.append(el); });
       await page.waitForTimeout(200); assert.equal(await page.evaluate(() => window.securityExecuted), undefined);

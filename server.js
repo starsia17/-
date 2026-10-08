@@ -6,9 +6,11 @@ const os = require('os');
 const path = require('path');
 const express = require('express');
 const mongoose = require('mongoose');
+const { configureMongoose, connectionOptions } = require('./mongo-security');
+configureMongoose(mongoose);
 const multer = require('multer');
 const sanitizeHtml = require('sanitize-html');
-const { configureSecurity, verifiedMediaType } = require('./security');
+const { configureSecurity, verifiedMediaType, production } = require('./security');
 const PortfolioPost = require('./models/PortfolioPost');
 const PortfolioUser = require('./models/PortfolioUser');
 const PortfolioSession = require('./models/PortfolioSession');
@@ -34,11 +36,16 @@ const inlineMediaTypes = new Set([
 
 fs.mkdirSync(TEMP_UPLOAD_DIR, { recursive: true });
 configureSecurity(app);
+app.use('/api/auth', express.json({ limit: '16kb' }));
+app.use('/api/account/security', express.json({ limit: '16kb' }));
 app.use(express.json({ limit: '4mb' }));
 app.use(express.static(path.join(__dirname, 'public'), { dotfiles: 'deny' }));
 server.headersTimeout = 20000;
 server.requestTimeout = 300000;
 server.keepAliveTimeout = 5000;
+server.maxHeadersCount = 100;
+server.maxConnections = 256;
+server.maxRequestsPerSocket = 1000;
 app.use('/api', async (req, res, next) => {
   if (Date.now() - lastTrashPurgeAt < 60 * 1000) return next();
   lastTrashPurgeAt = Date.now();
@@ -470,18 +477,18 @@ function plainTextFromHtml(html) {
 
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
-  const status = err.code === 'PASSWORD_BUSY' ? 429 : err instanceof multer.MulterError ? (err.code === 'LIMIT_FILE_SIZE' ? 413 : 400) : ['entity.too.large'].includes(err.type) ? 413 : err.type === 'entity.parse.failed' ? 400 : err.status === 503 ? 503 : 500;
+  const status = ['PASSWORD_BUSY', 'MFA_RATE_LIMITED'].includes(err.code) ? 429 : err instanceof multer.MulterError ? (err.code === 'LIMIT_FILE_SIZE' ? 413 : 400) : ['entity.too.large'].includes(err.type) ? 413 : err.type === 'entity.parse.failed' ? 400 : err.status === 503 ? 503 : 500;
   let message = status === 413 ? '요청이 허용 크기를 초과했습니다.' : status === 400 ? '입력 형식이나 첨부 제한을 확인해주세요.' : '요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.';
   if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') message = '파일당 최대 크기는 50MB입니다.';
-  if (err.status === 503 || err.code === 'PASSWORD_BUSY') message = err.message;
-  if (status === 429) res.set('Retry-After', '3');
+  if (err.status === 503 || ['PASSWORD_BUSY', 'MFA_RATE_LIMITED'].includes(err.code)) message = err.message;
+  if (status === 429) res.set('Retry-After', err.code === 'MFA_RATE_LIMITED' ? '600' : '3');
   if (req.path.startsWith('/api/')) return res.status(status).json({ success: false, message });
   res.status(status).send(message);
 });
 
 async function start() {
   if (!MONGO_URI) throw new Error('MONGODB_URI 환경 변수를 설정해주세요.');
-  await mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 10000 });
+  await mongoose.connect(MONGO_URI, connectionOptions(production()));
   await Promise.all([PortfolioPost.createIndexes(), PortfolioUser.createIndexes(), PortfolioSession.createIndexes(), PortfolioNotice.createIndexes(), PortfolioNews.createIndexes(), PortfolioCollection.createIndexes(), PortfolioShare.createIndexes()]);
   await auth.initializeAdmin(PortfolioPost);
   mediaBucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, { bucketName: GRIDFS_BUCKET_NAME });

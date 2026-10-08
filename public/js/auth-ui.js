@@ -24,7 +24,7 @@
   async function read(response) {
     let data;
     try { data = await response.json(); } catch { throw Error('서버에 연결하지 못했습니다. 잠시 후 다시 시도해주세요.'); }
-    if (!response.ok || data.success === false) throw Error(data.message || '요청을 처리하지 못했습니다.');
+    if (!response.ok || data.success === false) { const error = Error(data.message || '요청을 처리하지 못했습니다.'); error.mfaRequired = data.mfaRequired === true; throw error; }
     return data;
   }
   async function refresh() {
@@ -57,9 +57,11 @@
       const selected = button.dataset.authViewButton === name;
       button.classList.toggle('active', selected); button.setAttribute('aria-pressed', String(selected));
     });
+    forms.forEach(form => { const code = form.querySelector('[name=code]'); if (code) code.required = false; });
     document.querySelector('#authNotice').hidden = true;
   }
   document.querySelectorAll('[data-auth-view-button]').forEach(button => button.addEventListener('click', () => showForm(button.dataset.authViewButton)));
+  document.querySelector('#loginUsername').addEventListener('input', () => { document.querySelector('#loginSecondFactor').required = false; });
   forms.forEach(form => form.addEventListener('submit', async event => {
     event.preventDefault();
     if (!form.reportValidity()) return;
@@ -88,7 +90,10 @@
         setUser(data.user); channel?.postMessage('changed');
         window.scrollTo({ top: 0, behavior: 'instant' });
       }
-    } catch (error) { notice.textContent = error.message; notice.hidden = false; }
+    } catch (error) {
+      notice.textContent = error.message; notice.hidden = false;
+      if (error.mfaRequired) { const code = form.querySelector('[name=code]'); if (code) { code.required = true; code.focus(); } }
+    }
     finally { button.disabled = false; }
   }));
   async function logout() {
