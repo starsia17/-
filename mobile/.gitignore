@@ -1,0 +1,7 @@
+android/build/
+dist/
+*.p12
+*.jks
+*.keystore
+ios/*.xcodeproj/
+ios/*.xcworkspace/
