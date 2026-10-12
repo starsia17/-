@@ -1,7 +1,7 @@
 (() => {
   const node = (tag, text, cls) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; };
   const details = [['experienceHtml','경력 · 활동','기간, 소속, 담당 업무와 성과를 작성하세요.'],['educationHtml','학력 · 교육','전공과 직무 관련 교육을 작성하세요.'],['skillsHtml','기술 · 사용 도구','사용 가능한 도구와 활용 경험을 작성하세요.'],['credentialsHtml','수상 · 자격','직무 관련 수상 및 자격 사항을 작성하세요.']];
-  const blank = () => ({ name: '', role: '', email: '', phone: '', website: '', birthDate:'',address:'',bodyHtml: '',...Object.fromEntries(details.map(([key])=>[key,''])) });
+  const blank = () => ({ name: '', role: '', email: '', phone: '', website: '', birthDate:'',address:'',postcode:'',addressBase:'',addressDetail:'',experiences:[],careerType:'',bodyHtml: '',...Object.fromEntries(details.map(([key])=>[key,''])) });
   const projectTemplate = '<h2>프로젝트 개요</h2><p>작업 목표와 배경을 작성하세요.</p><h2>담당 역할 · 기여도</h2><p>팀 규모, 맡은 역할과 직접 수행한 작업을 작성하세요.</p><h2>기간 · 사용 도구</h2><p>작업 기간과 사용한 프로그램을 작성하세요.</p><h2>문제와 해결 과정</h2><p>문제 정의, 시도한 방법과 선택한 이유를 작성하세요.</p><h2>결과 · 성과</h2><p>최종 결과와 확인 가능한 수치 또는 피드백을 작성하세요.</p><h2>배운 점</h2><p>개선한 점과 다음 작업에 적용할 내용을 작성하세요.</p>';
   const resumeTemplate = '<h2>자기소개</h2><p>지원 직무와 나의 강점을 소개하세요.</p><h2>입사 후 포부</h2><p>입사 후 목표와 회사에 기여할 방향을 작성하세요.</p>';
   function migrate(value) {
@@ -44,17 +44,18 @@
   function resumeFields(root) {
     const fields = node('div', undefined, 'career-fields'), inputs = {};
     root.append(node('h3','기본 정보'));
-    for (const [name, label, max, type] of [['name','이름',80,'text'],['birthDate','생년월일 · 선택',10,'date'],['role','직무 · 한 줄 소개',120,'text'],['email','이메일',254,'email'],['phone','연락처',60,'tel'],['website','개인 링크',2048,'url'],['address','주소 · 선택',200,'text']]) inputs[name] = field(fields, name, label, max, type);
+    for (const [name, label, max, type] of [['name','이름',80,'text'],['birthDate','생년월일 · 선택',10,'date'],['role','직무 · 한 줄 소개',120,'text'],['email','이메일',254,'email'],['phone','연락처',60,'tel'],['website','개인 링크',2048,'url']]) inputs[name] = field(fields, name, label, max, type);
+    const homeAddress=window.portfolioResumeParts.address(fields);
     inputs.birthDate.min='1900-01-01';inputs.birthDate.max=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Seoul'});
-    root.append(fields,node('p','생년월일과 주소는 선택 항목입니다. 포트폴리오에 이력서를 포함하면 함께 공개되므로 공개할 정보만 입력하세요.','portfolio-note'));
-    const records=node('div',undefined,'career-record-grid'),recordEditors={};
-    for(const[key,label,help]of details){const card=node('details',undefined,'career-record');card.open=!matchMedia('(max-width:760px)').matches;card.append(node('summary',label),node('p',help,'portfolio-note'));recordEditors[key]=editor(card,label);records.append(card);}
+    root.append(fields,node('p','생년월일과 집 주소는 선택 항목입니다. 포트폴리오에 이력서를 포함하면 함께 공개되므로 공개할 정보만 입력하세요.','portfolio-note'));
+    const careerChoice=window.portfolioResumeParts.careerType(root),records=node('div',undefined,'career-record-grid'),recordEditors={};let jobs;
+    for(const[key,label,help]of details){const card=node('details',undefined,'career-record');card.open=!matchMedia('(max-width:760px)').matches;card.append(node('summary',label),node('p',help,'portfolio-note'));if(key==='experienceHtml'){jobs=window.portfolioResumeParts.experiences(card,editor);careerChoice.onChange(value=>jobs.visible(value!=='new'));card.append(node('p','추가 경력 · 활동 메모','career-job-description-label'));}recordEditors[key]=editor(card,label);records.append(card);}
     root.append(records);const bodySection=node('section',undefined,'career-writing-section');bodySection.append(node('h3','자기소개 · 입사 후 포부'),node('p','위 항목은 경력 정보로 관리하고, 아래 본문에는 자기소개와 입사 후 포부를 작성하세요.','portfolio-note'));root.append(bodySection);
     const edit = editor(bodySection, '이력서 본문');
     const template = templateButton(bodySection, '이력서 양식 넣기', edit, resumeTemplate);
-    return { set(value = blank()) { value=migrate(value);Object.entries(inputs).forEach(([key, input]) => { input.value = value[key] || ''; }); edit.tools.reset(); edit.target.innerHTML = value.bodyHtml || '';Object.entries(recordEditors).forEach(([key,e])=>{e.tools.reset();e.target.innerHTML=value[key]||'';}); },
-      get() { return { ...Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, input.value.trim()])),...Object.fromEntries(Object.entries(recordEditors).map(([key,e])=>[key,e.target.textContent.trim()?e.tools.html():''])), bodyHtml: edit.tools.html() }; },
-      busy(value) { Object.values(inputs).forEach(input => { input.disabled = value; }); template.disabled = value; edit.tools.setBusy(value);Object.values(recordEditors).forEach(e=>e.tools.setBusy(value)); }, edit, bodySection };
+    return { set(value = blank()) { value=migrate(value);homeAddress.set(value);jobs.set(value.experiences||[]);careerChoice.set(value.careerType||'');Object.entries(inputs).forEach(([key, input]) => { input.value = value[key] || ''; }); edit.tools.reset(); edit.target.innerHTML = value.bodyHtml || '';Object.entries(recordEditors).forEach(([key,e])=>{e.tools.reset();e.target.innerHTML=value[key]||'';}); },
+      get() { return { ...homeAddress.get(),careerType:careerChoice.get(),experiences:jobs.get(), ...Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, input.value.trim()])),...Object.fromEntries(Object.entries(recordEditors).map(([key,e])=>[key,e.target.textContent.trim()?e.tools.html():''])), bodyHtml: edit.tools.html() }; },
+      busy(value) {homeAddress.busy(value);jobs.busy(value);careerChoice.busy(value);Object.values(inputs).forEach(input => { input.disabled = value; }); template.disabled = value; edit.tools.setBusy(value);Object.values(recordEditors).forEach(e=>e.tools.setBusy(value)); }, edit, bodySection };
   }
   const form = document.querySelector('#portfolioBuilderForm'), intro = document.querySelector('#portfolioIntroEditor');
   let introTools, resumeTools, noteEditor, company, role, include, noteSelect, noteHelp, importButton, noteTemplate, extras, resumeSnapshot, notes = new Map(), selectedPosts = [], activeNote = '', builderReady = false, builderGeneration = 0;
@@ -106,8 +107,8 @@
   }
   function builderValues() {
     saveNote(); const introductionHtml = introTools.html(); const projectNotes = selectedPosts.map(post => ({ postId: post._id, bodyHtml: notes.get(post._id) || '' })).filter(note => note.bodyHtml);
-    const resume = include.checked ? resumeTools.get() : null;
-    const htmls = [introductionHtml, ...projectNotes.map(note => note.bodyHtml), resume?.bodyHtml || '',...details.map(([key])=>resume?.[key]||'')];
+    const resume = include.checked ? resumeTools.get() : null;if(resume?.careerType==='new')resume.experiences=[];
+    const htmls = [introductionHtml, ...projectNotes.map(note => note.bodyHtml), resume?.bodyHtml || '',...details.map(([key])=>resume?.[key]||''),...(resume?.experiences||[]).map(row=>row.descriptionHtml||'')];
     if (htmls.some(html => { const e = node('div'); e.innerHTML = html; return html.length > 150000 || e.textContent.length > 25000; })) throw Error('각 편집 영역은 최대 25,000자까지 작성할 수 있습니다.');
     if (htmls.reduce((sum,html)=>sum+html.length,0) > 600000) throw Error('포트폴리오 전체 편집 내용이 너무 큽니다. 작업 수를 나누어 저장해주세요.');
     return { introduction: intro.innerText.trim().slice(0,2000), introductionHtml, targetCompany: company.value.trim(), targetRole: role.value.trim(), resume, projectNotes };
@@ -162,5 +163,6 @@
   window.portfolioAuth.ready.then(() => { syncUser(window.portfolioAuth.user); if (location.hash === '#mypage/resume') showProfile(true); });
   window.portfolioCareer = { openBuilder, syncSelection, builderValues, busyBuilder, leaveBuilder };
 window.__pfHooks=window.__pfHooks||{};
-window.__pfHooks.profile={ready:()=>profileLoaded&&!profileBusy,capture:()=>profileLoaded?{value:profileTools.get(),revision:profileRevision}:null,restore(s){if(!profileLoaded||profileBusy)return false;profileTools.set(s.value);profileRevision=s.revision;profileStatus.textContent='앱에 남겨둔 작성 내용을 복원했습니다. 저장 전 확인해주세요.';return true;}};
+window.__pfHooks.profile={structured:true,ready:()=>profileLoaded&&!profileBusy,capture:()=>profileLoaded?{value:profileTools.get(),revision:profileRevision}:null,restore(s){if(!profileLoaded||profileBusy)return false;profileTools.set({...profileTools.get(),...s.value});profileRevision=s.revision;profileStatus.textContent='앱에 남겨둔 작성 내용을 복원했습니다. 저장 전 확인해주세요.';return true;}};
+
 })();
