@@ -48,14 +48,16 @@
   function resumeCard(profile) {
     const section = node('section', undefined, 'career-resume'); section.append(node('p', 'PROFILE & RESUME', 'eyebrow'));
     if (profile.name) section.append(node('h2', profile.name));
+    if(profile.careerType)section.append(node('p',profile.careerType==='new'?'신입':'경력','career-type-badge'));
     if (profile.role) section.append(node('p', profile.role, 'career-role'));
     const contact = node('div', undefined, 'career-contact');
     if (profile.email) { const a = node('a', profile.email); a.href = 'mailto:' + profile.email; contact.append(a); }
     if (profile.phone) contact.append(node('span', profile.phone));
     if (profile.birthDate) contact.append(node('span','생년월일: '+profile.birthDate));
-    if (profile.address) contact.append(node('span','주소: '+profile.address));
+    if (profile.address) contact.append(node('span','집 주소: '+[profile.postcode?'('+profile.postcode+')':'',profile.address].filter(Boolean).join(' ')));
     if (profile.website) { const a = node('a', profile.website); a.href = profile.website; a.target = '_blank'; a.rel = 'noopener noreferrer'; contact.append(a); }
     section.append(contact);
+    if(profile.careerType!=='new'&&profile.experiences?.length){const group=node('section',undefined,'career-resume-record career-resume-jobs');group.append(node('h3','직장 경력'));for(const job of profile.experiences){const card=node('article',undefined,'career-resume-job');card.append(node('h4',job.company),node('p',[job.department,job.position,job.employmentType].filter(Boolean).join(' · '),'career-job-meta'),node('p',[job.startMonth||'입사 시기 미기재',job.current?'현재 재직 중':job.endMonth||'퇴사 시기 미기재'].join(' — '),'career-job-meta'));if(job.descriptionHtml){const body=node('div',undefined,'blog-article');body.innerHTML=job.descriptionHtml;card.append(body);}group.append(card);}section.append(group);}
     for(const[key,title]of [['experienceHtml','경력 · 활동'],['educationHtml','학력 · 교육'],['skillsHtml','기술 · 사용 도구'],['credentialsHtml','수상 · 자격']])if(profile[key]){const group=node('section',undefined,'career-resume-record');group.append(node('h3',title));const article=node('article',undefined,'blog-article');article.innerHTML=profile[key];group.append(article);section.append(group);}
     if (profile.bodyHtml) { const article = node('article', undefined, 'blog-article'); article.innerHTML = profile.bodyHtml; section.append(article); }
     return section;

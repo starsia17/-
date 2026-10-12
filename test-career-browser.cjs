@@ -21,6 +21,7 @@ async function checkWidth(page) { assert(await page.evaluate(() => document.docu
       await page.goto(base + '/#mypage/resume');
       await page.waitForFunction(() => !document.querySelector('.career-profile-form button[type=submit]')?.disabled);
       const profile = page.locator('.career-profile-form'), resumeEditor = profile.getByRole('textbox',{name:'이력서 본문',exact:true});
+      await profile.locator('input[name=careerType][value=new]').check();
       await edit(resumeEditor, '<h2>편집 내용 보존</h2><p>저장 전 내용도 출력</p>');
       await resumeEditor.evaluate(el => { el.focus(); const range = document.createRange(); range.selectNodeContents(el.querySelector('h2')); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); });
       await profile.locator('.career-writing-section [data-font-step="1"]').click();
@@ -62,7 +63,7 @@ async function checkWidth(page) { assert(await page.evaluate(() => document.docu
       await choices.nth(1).uncheck(); await choices.nth(1).check();
       await select.selectOption(second); assert.equal(await note.innerText(), '두 번째 별도 설명');
       const resumeBox = form.locator('details').first(); await resumeBox.locator(':scope > summary').click();
-      const include = resumeBox.locator('input[type=checkbox]'); await include.check();
+      const include = resumeBox.getByRole('checkbox',{name:'이 포트폴리오에 이력서·연락처 포함',exact:true}); await include.check();
       await resumeBox.getByRole('button', { name: '마이페이지 프로필 가져오기', exact: true }).click();
       await page.waitForFunction(() => document.querySelector('#portfolioBuilderForm input[name=name]').disabled === false && document.querySelector('#portfolioBuilderForm [aria-label="이력서 본문"]').textContent.includes('편집 내용 보존'));
       assert((await resumeBox.getByRole('textbox',{name:'이력서 본문',exact:true}).innerText()).includes('편집 내용 보존'));

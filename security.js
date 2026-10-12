@@ -15,7 +15,7 @@ function configureSecurity(app) {
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       fontSrc: ["'self'", 'https://fonts.gstatic.com'], imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
       mediaSrc: ["'self'", 'blob:', 'https:'], connectSrc: ["'self'"],
-      frameSrc: ['https://www.youtube-nocookie.com', 'https://player.vimeo.com'],
+      frameSrc: ['https://postcode.map.kakao.com', 'https://www.youtube-nocookie.com', 'https://player.vimeo.com'],
       objectSrc: ["'none'"], baseUri: ["'self'"], formAction: ["'self'"], frameAncestors: ["'none'"],
       upgradeInsecureRequests: production() ? [] : null
     } }

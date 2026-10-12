@@ -36,7 +36,7 @@ module.exports = function mount(app, Share, Post, Collection, requireUser, strea
   function presentation(type, item, posts, mediaPath) {
     const notes = new Map((item.projectNotes || []).map(note => [String(note.postId), note.bodyHtml]));
     return { success: true, type, title: item.title, introduction: item.introduction || '', introductionHtml: item.introductionHtml || '',
-      resume: type === 'portfolio' ? item.resume || null : null, layout: item.layout || 'story',
+      resume: type === 'portfolio' && item.resume ? {...item.resume,experiences:item.resume.careerType==='new'?[]:item.resume.experiences||[]} : null, layout: item.layout || 'story',
       posts: posts.map(post => ({ title: post.title, category: post.category, description: post.description, projectHtml: notes.get(String(post._id)) || '',
         bodyHtml: (post.bodyHtml || '').replace(/\/api\/media\/([a-f\d]{24})/gi, (_, id) => mediaPath(id)),
         media: (post.media || []).map(media => ({ type: media.type, name: media.name, url: mediaPath(media.fileId) })) })) };

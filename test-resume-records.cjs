@@ -1,0 +1,8 @@
+const assert=require('node:assert/strict'),{resume,emptyResume}=require('./career-content'),{sanitizeRichText}=require('./server');
+const plain=s=>s.replace(/<[^>]*>/g,''),parse=(v,old={})=>resume(v,sanitizeRichText,plain,old),base=emptyResume();
+const row={company:'회사',department:'개발',position:'사원',employmentType:'정규직',startMonth:'2020-01',endMonth:'2021-02',current:false,descriptionHtml:'<p>성과</p><script>alert(1)</script>'};
+const saved=parse({...base,careerType:'experienced',postcode:'04524',addressBase:'서울 중구 세종대로 110',addressDetail:'2층',experiences:[row]});assert.equal(saved.address,'서울 중구 세종대로 110 2층');assert(!saved.experiences[0].descriptionHtml.includes('script'));
+const legacy={name:'',role:'',email:'',phone:'',website:'',bodyHtml:''};assert.deepEqual(parse(legacy,saved),saved);const changed=parse({...legacy,address:'부산'},saved);assert.equal(changed.addressBase,'');assert.equal(changed.addressDetail,'');assert.equal(changed.postcode,'');assert.equal(changed.experiences.length,1);
+for(const patch of [{postcode:'123'},{addressBase:'',addressDetail:'2층'},{careerType:'invalid'},{experiences:[{...row,startMonth:'2021-13'}]},{experiences:[{...row,endMonth:'2019-01'}]},{experiences:[{...row,current:'true'}]},{experiences:[{...row,company:''}]},{experiences:Array(31).fill(row)}])assert.throws(()=>parse({...saved,...patch}));
+assert.equal(parse({...saved,experiences:[{...row,current:true}]}).experiences[0].endMonth,'');assert.equal(parse({...saved,careerType:'new'}).experiences.length,1);
+console.log('PASS structured resume: address composition/validation, legacy preservation, employment dates/count/types, sanitization and retained private experience');
