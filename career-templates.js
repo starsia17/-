@@ -39,7 +39,7 @@ module.exports=function mount(app,User,requireUser,storage){
       const handle=await fs.open(file.path,'r'),header=Buffer.alloc(8);try{await handle.read(header,0,8,0);}finally{await handle.close();}
       if(!/\.pdf$/i.test(name)||!header.subarray(0,5).equals(Buffer.from('%PDF-')))return res.status(400).json({success:false,message:'실제 PDF 파일만 불러올 수 있습니다.'});
       let state;try{state=draftState(req.body.editState);}catch(e){return res.status(400).json({success:false,message:e.message});}
-      file.originalname=name;const saved=await storage.store(file,ids);
+      file.originalname=name;const saved=await storage.store(file,ids,req.user._id);
       const item={fileId:saved.fileId,name,size:file.size,format:'pdf',kind,sourceId:sourceId||null,creationKey:key,company,editState:state,createdAt:new Date()};
       const query={_id:req.user._id,'careerTemplates.9':{$exists:false},'careerTemplates.creationKey':{$ne:key}};if(sourceId)query['careerTemplates.fileId']=sourceId;
       const user=await User.findOneAndUpdate(query,{$push:{careerTemplates:item}},{new:true,runValidators:true}).select('careerTemplates').lean();

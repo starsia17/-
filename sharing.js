@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-module.exports = function mount(app, Share, Post, Collection, requireUser, streamMedia) {
+module.exports = function mount(app, Share, Post, Collection, requireUser, streamMedia, ownerAvailable=async()=>true) {
   const valid = req => ['post', 'portfolio'].includes(req.params.type) && /^[a-f\d]{24}$/i.test(req.params.id);
   const owned = req => ({ ownerId: req.user._id, type: req.params.type, sourceId: req.params.id });
   const notFound = res => res.status(404).json({ success: false, message: '공유가 중지되었거나 항목을 확인할 수 없습니다.' });
@@ -9,6 +9,7 @@ module.exports = function mount(app, Share, Post, Collection, requireUser, strea
     const share = await Share.findOne({ token }).lean(); if (!share) return null;
     const item = await source(share.type, share.sourceId, share.ownerId); if (!item) return null;
     const posts = share.type === 'post' ? [item] : await Post.find({ ownerId: share.ownerId, _id: { $in: item.postIds }, deletedAt: null }).lean();
+    if(!await ownerAvailable(share.ownerId))return null;
     const map = new Map(posts.map(post => [String(post._id), post]));
     return { share, item, posts: share.type === 'post' ? posts : item.postIds.map(id => map.get(String(id))).filter(Boolean) };
   }

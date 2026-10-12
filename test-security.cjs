@@ -36,12 +36,13 @@ function model(name) {
   function change(row, update) {
     Object.assign(row, update.$set || {});
     for (const [key, by] of Object.entries(update.$inc || {})) row[key] = (row[key] || 0) + by;
-    for (const [key, value] of Object.entries(update.$pull || {})) row[key] = row[key].filter(x => x !== value);
+    for (const [key, value] of Object.entries(update.$pull || {})) row[key] = (row[key]||[]).filter(x => typeof value==='object'?!matches(x,value):x!==value);
+    for(const[key,value]of Object.entries(update.$push||{}))(row[key]||=[]).push(clone(value));
   }
   return { create, find: q => query(() => rows.filter(x => matches(x, q))), findById: id => query(() => rows.find(x => x._id === String(id)) || null),
     findOne: q => query(() => rows.find(x => matches(x, q)) || null),
     findOneAndUpdate: (q, update, options = {}) => ({ select() { return this; }, async then(a, b) { try { let row = rows.find(x => matches(x, q)); if (!row && options.upsert) { await create(update.$setOnInsert); row = rows.at(-1); } if (row) change(row, update); return a(clone(row || null)); } catch (e) { return b(e); } } }),
-    async updateOne(q, update) { const row = rows.find(x => matches(x, q)); if (row) change(row, update); },
+    async updateOne(q, update) { const row = rows.find(x => matches(x, q)); if (row) change(row, update);return{modifiedCount:row?1:0}; },
     async updateMany(q, update) { const targets = rows.filter(x => matches(x, q)); targets.forEach(x => change(x, update)); return { modifiedCount: targets.length }; },
     async deleteOne(q) { const i = rows.findIndex(x => matches(x, q)); if (i >= 0) rows.splice(i, 1); },
     async deleteMany(q) { for (let i = rows.length - 1; i >= 0; --i) if (matches(rows[i], q)) rows.splice(i, 1); }

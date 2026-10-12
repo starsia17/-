@@ -18,9 +18,10 @@ const PortfolioNotice = require('./models/PortfolioNotice');
 const PortfolioNews = require('./models/PortfolioNews');
 const PortfolioCollection = require('./models/PortfolioCollection');
 const PortfolioShare = require('./models/PortfolioShare');
-const auth = require('./auth')(PortfolioUser, PortfolioSession, process.env.PORTFOLIO_ADMIN_PASSWORD || '');
+const accountWork=require('./account-work')({User:PortfolioUser});
+const auth = require('./auth')(PortfolioUser, PortfolioSession, process.env.PORTFOLIO_ADMIN_PASSWORD || '',{work:accountWork,isAdminRetired:async()=>!!(await mongoose.connection.db?.collection('portfolioSettings').findOne({_id:'admin-withdrawn'}))?.disabled});
 
-const app = express();
+const app = express();accountWork.install(app);
 const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGODB_URI;
@@ -102,7 +103,13 @@ require('./member-portal')(app, PortfolioUser, PortfolioSession, PortfolioNews, 
 require('./portfolio-builder')(app, PortfolioCollection, PortfolioPost, requireUser, serializePost, PortfolioShare, sanitizeRichText, plainTextFromHtml);
 require('./career-profile')(app, PortfolioUser, requireUser, sanitizeRichText, plainTextFromHtml);
 require('./career-templates')(app,PortfolioUser,requireUser,{upload:upload.array('template',1,20*1024*1024),store:storeMediaFile,stream:streamMedia,cleanupTemp:cleanupTempFiles,cleanupFiles:ids=>cleanupGridFsFiles(ids.map(id=>new mongoose.Types.ObjectId(String(id))))});
-require('./sharing')(app, PortfolioShare, PortfolioPost, PortfolioCollection, requireUser, streamMedia);
+require('./sharing')(app, PortfolioShare, PortfolioPost, PortfolioCollection, requireUser, streamMedia,async owner=>!accountWork.isBlocked(owner)&&!!(await PortfolioUser.findOne({_id:owner,accountDeletionAt:null}).select('_id').lean()));
+const withdrawal=require('./account-withdrawal')(app,{User:PortfolioUser,Session:PortfolioSession,Post:PortfolioPost,Collection:PortfolioCollection,Share:PortfolioShare,News:PortfolioNews,Notice:PortfolioNotice,auth,work:accountWork,
+ removeFiles:async(ids,owner)=>{if(!mediaBucket)throw Error('DatabaseUnavailable');await require('./account-files')(mongoose.connection.db,GRIDFS_BUCKET_NAME,ids,owner);},
+ ownedMediaIds:async owner=>{if(!mediaBucket)throw Error('DatabaseUnavailable');return(await mediaBucket.find({'metadata.ownerId':String(owner)}).project({_id:1}).toArray()).map(file=>file._id);},
+ retireAdmin:async()=>{await mongoose.connection.db.collection('portfolioSettings').updateOne({_id:'admin-withdrawn'},{$set:{disabled:true}},{upsert:true});}
+});
+
 
 app.get('/api/posts', requireUser, async (req, res) => {
   try {
@@ -245,7 +252,7 @@ app.post('/api/posts', requireUser, upload.array('media', 10), async (req, res) 
     }
     const media = [];
     for (const file of req.files || []) {
-      const stored = await storeMediaFile(file, uploadedIds);
+      const stored = await storeMediaFile(file, uploadedIds, req.user._id);
       media.push(stored);
     }
     const bodyHtml = sanitizeRichText(req.body.bodyHtml || '', createInlineMediaMap(req.body.inlineMedia, media), new Set(media.map(item => String(item.fileId))));
@@ -296,7 +303,7 @@ app.put('/api/posts/:id', requireUser, upload.array('media', 10), async (req, re
     const media = [...(post.media || [])];
     const addedMedia = [];
     for (const file of req.files || []) {
-      const stored = await storeMediaFile(file, uploadedIds);
+      const stored = await storeMediaFile(file, uploadedIds, req.user._id);
       media.push(stored);
       addedMedia.push(stored);
     }
@@ -342,12 +349,12 @@ function createInlineMediaMap(rawDescriptors, uploadedMedia) {
   return mapping;
 }
 
-async function storeMediaFile(file, uploadedIds) {
+async function storeMediaFile(file, uploadedIds, owner) {
   const contentType = await verifiedMediaType(file);
   const originalName = path.basename(file.originalname.replace(/\\/g, '/')).replace(/[\x00-\x1f\x7f]/g, '').slice(0, 200) || 'download';
   const type = !inlineMediaTypes.has(contentType) ? 'file' : contentType.startsWith('video/') ? 'video' : 'image';
   const stream = mediaBucket.openUploadStream(file.filename, {
-    metadata: { contentType, kind: type, originalName }
+    metadata: { contentType, kind: type, originalName, ...(owner?{ownerId:String(owner)}:{}) }
   });
   uploadedIds.push(stream.id);
   const completed = new Promise((resolve, reject) => {
@@ -400,8 +407,8 @@ async function purgeExpiredTrash() {
 
 async function cleanupExpiredMediaOrphans() {
   if (!mediaBucket) return;
-  const [postIds,templateIds] = await Promise.all([PortfolioPost.distinct('media.fileId'),PortfolioUser.distinct('careerTemplates.fileId')]);
-  const referencedIds = [...postIds,...templateIds];
+  const [postIds,templateIds,deletionIds] = await Promise.all([PortfolioPost.distinct('media.fileId'),PortfolioUser.distinct('careerTemplates.fileId'),PortfolioUser.distinct('accountDeletionFiles')]);
+  const referencedIds = [...postIds,...templateIds,...deletionIds];
   const cutoff = new Date(Date.now() - TRASH_RETENTION_MS);
   const orphaned = await mediaBucket.find({ uploadDate: { $lt: cutoff }, _id: { $nin: referencedIds } }).project({ _id: 1 }).toArray();
   await cleanupGridFsFiles(orphaned.map(file => file._id));
@@ -500,6 +507,8 @@ async function start() {
   await Promise.all([PortfolioPost.createIndexes(), PortfolioUser.createIndexes(), PortfolioSession.createIndexes(), PortfolioNotice.createIndexes(), PortfolioNews.createIndexes(), PortfolioCollection.createIndexes(), PortfolioShare.createIndexes()]);
   await auth.initializeAdmin(PortfolioPost);
   mediaBucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, { bucketName: GRIDFS_BUCKET_NAME });
+  await withdrawal.resume();
+  setInterval(()=>withdrawal.resume().catch(error=>console.error('회원탈퇴 정리 확인 실패:',error.name)),60000).unref();
   await purgeExpiredTrash();
   await cleanupExpiredMediaOrphans();
   setInterval(async () => {

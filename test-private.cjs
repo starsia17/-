@@ -31,7 +31,7 @@ function model(name) {
     findOne: q => query(() => store.find(x => matches(x,q)) || null),
     findById: id => query(() => store.find(x => String(x._id) === String(id)) || null),
     async updateMany(q, change) { let count=0; store.filter(x => matches(x,q)).forEach(x => { Object.assign(x,change.$set);count++; }); return {modifiedCount:count}; },
-    async updateOne(q, change) { const x=store.find(x => matches(x,q)); if(x)Object.assign(x,change.$set); },
+    async updateOne(q, change) { const x=store.find(x => matches(x,q)); if(x){Object.assign(x,change.$set||{});for(const[k,v]of Object.entries(change.$push||{}))(x[k]||=[]).push(v);for(const[k,v]of Object.entries(change.$pull||{}))x[k]=(x[k]||[]).filter(item=>!matches(item,v));}return{modifiedCount:x?1:0}; },
     async findOneAndUpdate(q, change, options={}) { let x=store.find(x => matches(x,q)); if(!x && options.upsert)x=await create(change.$setOnInsert); if(x && change.$set)Object.assign(x,change.$set);return x; },
     async findOneAndDelete(q) { const i=store.findIndex(x => matches(x,q));return i<0?null:store.splice(i,1)[0]; },
     async deleteOne(q) { const i=store.findIndex(x => matches(x,q));if(i>=0)store.splice(i,1); },

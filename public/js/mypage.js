@@ -4,6 +4,7 @@
   const loading = document.querySelector('#myPageLoading');
   const form = document.querySelector('#accountChangeForm');
   const save = document.querySelector('#saveAccountButton');
+  const withdrawButton=document.querySelector('#withdrawAccountButton');let withdrawing=false,withdrawDialog=null;
   const membersTab = document.querySelector('#membersTab');
   const memberList = document.querySelector('#memberList');
   const memberSearch = document.querySelector('#memberSearch');
@@ -26,7 +27,7 @@
     });
   }
   function renderAccount(data, resetForm = true) {
-    account = data; const user = data.user;
+    account = data; const user = data.user;withdrawButton.disabled=withdrawing;
     info(document.querySelector('#profileInfo'), [['아이디', user.username], ['계정 유형', user.kind === 'admin' ? '관리자' : '일반 회원'], ['가입일', date(user.createdAt)], ['오늘의 뉴스 작성', user.canWriteNews ? '작성 가능' : '작성 권한 없음']]);
     info(document.querySelector('#accountInfo'), [['아이디', user.username], ['비밀번호', user.kind === 'admin' ? '관리자 로그인 설정 사용' : '암호화하여 보관 중']]);
     document.querySelector('.account-security-note').textContent = user.kind === 'admin' ? '관리자는 기존 서버 설정의 관리자 비밀번호로 로그인합니다. 비밀번호는 화면에 표시하지 않습니다.' : '비밀번호는 암호화하여 보관하므로 표시하지 않습니다. 현재 비밀번호를 확인한 뒤 새 비밀번호로 변경할 수 있습니다.';
@@ -101,11 +102,12 @@
   }
   function syncUser(user) {
     membersTab.hidden = user?.kind !== 'admin';
-    const next = user ? user.kind + ':' + user.username : null;
+    const next = user ? user.id + ':' + user.kind + ':' + user.username : null;
     if (next === identity) {
       if (account && user) { account.user.canWriteNews = user.canWriteNews; renderAccount(account, false); }
       return;
     }
+    withdrawDialog?.close();withdrawDialog?.remove();withdrawDialog=null;withdrawing=false;withdrawButton.disabled=true;
     identity = next; version++; request++; memberRequest++; saving = false; account = null;
     members = []; memberList.replaceChildren(); memberSearch.value = ''; form.reset(); status('');
     document.querySelector('#profileInfo').replaceChildren(); document.querySelector('#accountInfo').replaceChildren();
@@ -114,6 +116,27 @@
     if (!user) page.hidden = true;
     else if (location.hash === '#mypage' || location.hash.startsWith('#mypage/')) setVisible(true, location.hash.split('/')[1] || 'profile');
   }
+  withdrawButton.addEventListener('click',()=>{
+    if(withdrawing||!account||!window.portfolioAuth.user||withdrawDialog)return;
+    const epoch=version,owner=window.portfolioAuth.user.id,dialog=document.createElement('dialog');withdrawDialog=dialog;dialog.className='withdraw-account-dialog';
+    const heading=document.createElement('h2');heading.id='withdrawAccountHeading';heading.textContent='정말로 회원을 탈퇴하시겠습니까?';dialog.setAttribute('aria-labelledby',heading.id);
+    const warning=document.createElement('p');warning.textContent='본인의 계정, 모든 게시글과 첨부파일, 휴지통, 이력서·회사 PDF 양식, 포트폴리오와 공유 링크를 영구 삭제합니다. 다른 회원의 계정과 자료는 삭제하지 않습니다. 삭제한 자료는 복원할 수 없습니다.'+(window.portfolioAuth.user.kind==='admin'?' 관리자 탈퇴 후 관리자 로그인도 중지됩니다.':'');
+    const notice=document.createElement('p');notice.setAttribute('role','status');
+    const actions=document.createElement('div');actions.className='withdraw-account-actions';const yes=document.createElement('button'),no=document.createElement('button');yes.type=no.type='button';yes.textContent='예';no.textContent='아니오';yes.className='withdraw-account-button';no.className='career-secondary';
+    function close(){if(withdrawing)return;dialog.close();dialog.remove();if(withdrawDialog===dialog)withdrawDialog=null;}
+    no.addEventListener('click',close);dialog.addEventListener('cancel',event=>{event.preventDefault();close();});
+    yes.addEventListener('click',async()=>{
+      if(withdrawing||epoch!==version||owner!==window.portfolioAuth.user?.id)return;
+      withdrawing=true;yes.disabled=no.disabled=withdrawButton.disabled=true;notice.textContent='본인 계정과 자료를 삭제하는 중…';
+      try{
+        const data=await read(await window.portfolioAuth.fetch('/api/account',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmed:true})}),epoch);
+        if(epoch!==version||owner!==window.portfolioAuth.user?.id)return;
+        window.portfolioAuth.withdrawn(data.message);
+      }catch(error){if(epoch===version){notice.textContent=error.message;withdrawing=false;yes.disabled=no.disabled=false;withdrawButton.disabled=false;}}
+    });
+    actions.append(no,yes);dialog.append(heading,warning,notice,actions);document.body.append(dialog);dialog.showModal();no.focus();
+  });
+  window.addEventListener('hashchange',()=>{if(!withdrawing&&location.hash!=='#mypage/profile'&&location.hash!=='#mypage'){withdrawDialog?.close();withdrawDialog?.remove();withdrawDialog=null;}});
   window.portfolioMyPage = { setVisible };
   setInterval(() => {
     if (!page.hidden && account?.changes && Date.now() >= new Date(account.changes.resetsAt).getTime() && loading.hidden) loadAccount();

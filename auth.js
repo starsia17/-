@@ -12,7 +12,8 @@ function equal(a, b) {
 }
 const publicUser = user => ({ id: String(user._id), username: user.kind === 'admin' ? '관리자' : user.username, kind: user.kind, mfaEnabled: requiresMfa(user), canWriteNews: user.kind === 'admin' || user.canWriteNews === true });
 
-module.exports = function createAuth(User, Session, adminPassword = '') {
+module.exports = function createAuth(User, Session, adminPassword = '', options = {}) {
+  const work=options.work||require('./account-work')();
   const loginChallenges = new Map();
   const rateLimit = createRateLimit({ limit: 30, key: req => {
     const pending = typeof req.body?.mfaChallenge === 'string' ? loginChallenges.get(req.body.mfaChallenge) : null;
@@ -46,11 +47,13 @@ module.exports = function createAuth(User, Session, adminPassword = '') {
     const tab = req.get('X-Portfolio-Tab') || (['GET', 'HEAD'].includes(req.method) && /^\/api\/media\/[a-f\d]{24}$/i.test(req.path) && typeof req.query.tab === 'string' ? req.query.tab : '') || '';
     if (!session.remember && !equal(digest(tab), session.tabHash)) return null;
     const user = await User.findById(session.userId).select('+mfaSecret +mfaRecoveryHashes');
-    if (!user) return null;
+    if (!user||user.accountDeletionAt||work.isBlocked(user._id)) return null;
     if ((session.authVersion || 0) !== (user.authVersion || 0)) return null;
     user.mfaEnabled = requiresMfa(user);
     if (user.mfaEnabled && (session.mfaVerified !== true || session.mfaPolicyVersion !== 2)) return null;
+    if(!await work.begin(req,user._id))return null;
     await Session.updateOne({ _id: session._id }, { $set: { lastSeenAt: new Date(now), expiresAt: new Date(now + IDLE_MS) } });
+    if(req.res?.destroyed){req.accountWrite?.();return null;}
     req.user = user; req.authSession = session;
     return user;
   }
@@ -68,7 +71,7 @@ module.exports = function createAuth(User, Session, adminPassword = '') {
   async function issueSession(req, res, user, verifiedSecondFactor) {
     // Enrollment may change while password hashing or factor verification is running.
     const current = await User.findById(user._id).select('+mfaSecret +mfaRecoveryHashes');
-    if (!current || (current.authVersion || 0) !== (user.authVersion || 0) || (requiresMfa(current) && verifiedSecondFactor !== true)) {
+    if (!current || current.accountDeletionAt || work.isBlocked(current._id) || (current.authVersion || 0) !== (user.authVersion || 0) || (requiresMfa(current) && verifiedSecondFactor !== true)) {
       return res.status(401).json({ success: false, mfaRequired: true, message: '인증 상태가 변경되었습니다. 2단계 인증을 포함해 다시 로그인해주세요.' });
     }
     const tab = String(req.body.tabToken || '');
@@ -81,8 +84,9 @@ module.exports = function createAuth(User, Session, adminPassword = '') {
     res.json({ success: true, user: publicUser(current), mfaRequired: requiresMfa(current), mfaVerified: verifiedSecondFactor === true, remember: req.body.remember === true });
   }
   async function finishLogin(req, res, user, password) {
+    if(!await work.begin(req,user._id))return res.status(401).json({success:false,message:'탈퇴 처리 중이거나 삭제된 계정입니다.'});
     const enrolled = await User.findById(user._id).select('+mfaSecret +mfaRecoveryHashes');
-    if (!enrolled || (enrolled.authVersion || 0) !== (user.authVersion || 0)) return res.status(401).json({ success: false, message: '계정 상태가 변경되었습니다. 다시 로그인해주세요.' });
+    if (!enrolled || enrolled.accountDeletionAt || work.isBlocked(enrolled._id) || (enrolled.authVersion || 0) !== (user.authVersion || 0)) return res.status(401).json({ success: false, message: '계정 상태가 변경되었습니다. 다시 로그인해주세요.' });
     // Operational evidence only: never log identity, passwords, OTPs, keys or challenges.
     console.info('[auth-policy]', JSON.stringify({ kind: user.kind, registered: requiresMfa(enrolled), hasChallenge: typeof req.body.mfaChallenge === 'string' }));
     if (requiresMfa(enrolled)) {
@@ -165,8 +169,9 @@ module.exports = function createAuth(User, Session, adminPassword = '') {
     return equal(value, stored.passwordHash);
   }
   async function initializeAdmin(Post) {
-    if (!adminPassword) return;
+    if (!adminPassword||await options.isAdminRetired?.()) return;
     const user = await User.findOneAndUpdate({ username: ADMIN_USERNAME }, { $setOnInsert: { username: ADMIN_USERNAME, kind: 'admin' } }, { upsert: true, new: true });
+    if(user.accountDeletionAt)return;
     if (User.collection?.findOne) {
       const raw = await User.collection.findOne({ _id: user._id });
       const fields = Object.keys(raw || {}).filter(key => /mfa|twofactor|totp|authenticator/i.test(key)).map(key => ({ field: key, type: Array.isArray(raw[key]) ? 'array' : typeof raw[key], present: Array.isArray(raw[key]) ? raw[key].length > 0 : raw[key] != null && raw[key] !== '' && raw[key] !== false }));
@@ -175,5 +180,5 @@ module.exports = function createAuth(User, Session, adminPassword = '') {
     }
     await Post.updateMany({ ownerId: null }, { $set: { ownerId: user._id } });
   }
-  return { mount, requireUser, initializeAdmin, rateLimit, IDLE_MS };
+  return { mount, requireUser, forgetAccount:owner=>{for(const[token,pending]of loginChallenges)if(pending.id===String(owner))loginChallenges.delete(token);}, work, initializeAdmin, rateLimit, IDLE_MS };
 };
