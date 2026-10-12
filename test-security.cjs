@@ -130,6 +130,10 @@ app.get('/fixture/rate', createRateLimit({ limit: 2 }), (req, res) => res.json({
     const proof = stores.Session.find(x => x.tokenHash === crypto.createHash('sha256').update(recovered.cookie.split('=')[1]).digest('hex'));
     proof.mfaVerified = false; assert.equal((await call('/api/posts',recovered)).status,401);
     proof.mfaVerified = true;
+    delete proof.mfaPolicyVersion;
+    assert.equal((await call('/api/auth/session',recovered)).data.authenticated,false);
+    assert.equal((await call('/api/posts',recovered)).status,401);
+    proof.mfaPolicyVersion = 2;
     assert.equal((await call('/api/account/security', bob)).data.enabled, false);
     const disabled = await call('/api/account/security/disable', { ...recovered, method: 'POST', body: { password: 'fixture-secure-pass', code: enabled.data.recoveryCodes[1] } });
     assert.equal(disabled.status, 200); assert.equal((await call('/api/posts', races.find(x => x.status === 200))).status, 401);
