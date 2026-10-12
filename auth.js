@@ -48,13 +48,23 @@ module.exports = function createAuth(User, Session, adminPassword = '') {
       return res.status(401).json({ success: false, message: '로그인이 필요하거나 로그인 시간이 만료되었습니다.' });
     } catch (error) { next(error); }
   }
-  async function issueSession(req, res, user) {
+  async function invalidatePreviousLogin(req, res) {
+    const old = cookieToken(req);
+    if (old) await Session.deleteOne({ tokenHash: digest(old) });
+    setCookie(res, '');
+  }
+  async function issueSession(req, res, user, verifiedSecondFactor) {
+    // Enrollment may change while password hashing or factor verification is running.
+    const current = await User.findById(user._id).select('+mfaSecret');
+    if (!current || (current.authVersion || 0) !== (user.authVersion || 0) || (requiresMfa(current) && verifiedSecondFactor !== true)) {
+      return res.status(401).json({ success: false, mfaRequired: true, message: '인증 상태가 변경되었습니다. 2단계 인증을 포함해 다시 로그인해주세요.' });
+    }
     const tab = String(req.body.tabToken || '');
     if (!/^[a-f\d-]{36}$/i.test(tab)) return res.status(400).json({ success: false, message: '로그인 화면을 새로고침한 뒤 다시 시도해주세요.' });
     const old = cookieToken(req);
     if (old) await Session.deleteOne({ tokenHash: digest(old) });
     const token = crypto.randomBytes(32).toString('hex');
-    await Session.create({ tokenHash: digest(token), userId: user._id, tabHash: digest(tab), remember: req.body.remember === true, mfaVerified: user.mfaEnabled === true, authVersion: user.authVersion || 0, lastSeenAt: new Date(), expiresAt: new Date(Date.now() + IDLE_MS) });
+    await Session.create({ tokenHash: digest(token), userId: user._id, tabHash: digest(tab), remember: req.body.remember === true, mfaVerified: verifiedSecondFactor === true, authVersion: user.authVersion || 0, lastSeenAt: new Date(), expiresAt: new Date(Date.now() + IDLE_MS) });
     setCookie(res, token);
     res.json({ success: true, user: publicUser(user), remember: req.body.remember === true });
   }
@@ -65,7 +75,7 @@ module.exports = function createAuth(User, Session, adminPassword = '') {
       const upgraded = await passwordHash(password, salt, CURRENT_KDF);
       await User.updateOne({ _id: user._id, passwordHash: user.passwordHash }, { $set: { passwordSalt: salt, passwordHash: upgraded, passwordKdf: CURRENT_KDF } });
     }
-    await issueSession(req, res, user);
+    await issueSession(req, res, user, mfa.hasVerifiedFactor(user));
   }
   function mount(app) {
     mfa.mount(app);
@@ -94,6 +104,7 @@ module.exports = function createAuth(User, Session, adminPassword = '') {
     });
     app.post('/api/auth/login', rateLimit, async (req, res, next) => {
       try {
+        await invalidatePreviousLogin(req, res);
         if (typeof req.body.username !== 'string' || typeof req.body.password !== 'string') return res.status(400).json({ success: false, message: '입력 형식이 올바르지 않습니다.' });
         const username = req.body.username.trim().toLowerCase();
         const password = typeof req.body.password === 'string' ? req.body.password : '';
@@ -107,6 +118,7 @@ module.exports = function createAuth(User, Session, adminPassword = '') {
     });
     app.post('/api/auth/admin/login', rateLimit, async (req, res, next) => {
       try {
+        await invalidatePreviousLogin(req, res);
         const password = typeof req.body.password === 'string' ? req.body.password : '';
         if (!adminPassword || password.length > 128 || !equal(password, adminPassword)) return res.status(401).json({ success: false, message: '관리자 비밀번호가 올바르지 않습니다.' });
         if (typeof req.body.tabToken !== 'string' || !/^[a-f\d-]{36}$/i.test(req.body.tabToken)) return res.status(400).json({ success: false, message: '로그인 화면을 새로고침한 뒤 다시 시도해주세요.' });

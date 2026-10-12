@@ -29,6 +29,7 @@ function codeStep(code, secret) {
 }
 
 module.exports = function createMfa(User, Session, auth) {
+  const verifiedFactors = new WeakSet();
   const attempts = new Map(); let lastSweep = 0;
   function reserveAttempt(id) {
     const now = Date.now();
@@ -39,6 +40,7 @@ module.exports = function createMfa(User, Session, auth) {
     ++value.count; attempts.set(id, value);
   }
   async function verify(user, code) {
+    verifiedFactors.delete(user);
     // Always read persisted enrollment; projected or stale flags must never bypass MFA.
     // Atomic consumption prevents concurrent login/disable requests from replaying a code.
     const stored = await User.findById(user._id).select('+mfaSecret +mfaRecoveryHashes');
@@ -47,7 +49,7 @@ module.exports = function createMfa(User, Session, auth) {
     user.mfaEnabled = required;
     if (!required) return true;
     const identity = String(stored._id); reserveAttempt(identity);
-    const accept = result => { if (result) attempts.delete(identity); return !!result; };
+    const accept = result => { if (result) { attempts.delete(identity); verifiedFactors.add(user); } return !!result; };
     if (!stored.mfaSecret) return false;
     const normalized = typeof code === 'string' ? code.replace(/-/g, '').toLowerCase() : '';
     if (/^[a-f\d]{32}$/.test(normalized)) {
@@ -113,7 +115,7 @@ module.exports = function createMfa(User, Session, auth) {
       } catch (error) { next(error); }
     });
   }
-  return { mount, verify };
+  return { mount, verify, hasVerifiedFactor: user => verifiedFactors.has(user) };
 };
 module.exports.encrypt = encrypt;
 module.exports.decrypt = decrypt;

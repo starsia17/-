@@ -108,6 +108,11 @@ app.get('/fixture/rate', createRateLimit({ limit: 2 }), (req, res) => res.json({
     assert.equal((await call('/api/account/security/confirm', { ...bob, method: 'POST', body: { code: generateSync({ secret }) } })).status, 400);
     const enabled = await call('/api/account/security/confirm', { ...alice, method: 'POST', body: { code: generateSync({ secret }) } });
     assert.equal(enabled.status, 200); assert.equal(enabled.data.recoveryCodes.length, 10);
+    // A failed fresh login must revoke the existing verified cookie, not restore it.
+    const staleAttempt = await call('/api/auth/login', { ...alice, method: 'POST', body: { username: 'alice', password: 'fixture-secure-pass', tabToken: crypto.randomUUID(), remember: true } });
+    assert.equal(staleAttempt.status, 401); assert.equal(staleAttempt.cookie, 'portfolio_session=');
+    assert.equal((await call('/api/auth/session', alice)).data.authenticated, false);
+    assert.equal((await call('/api/posts', alice)).status, 401);
     assert.ok(!JSON.stringify(stores.User).includes(secret)); assert.ok(!JSON.stringify(stores.User).includes(enabled.data.recoveryCodes[0].replace(/-/g, '')));
     assert.equal((await login('alice')).status, 401);
     assert.equal((await login('alice', 'wrong')).status, 401);
@@ -137,9 +142,13 @@ app.get('/fixture/rate', createRateLimit({ limit: 2 }), (req, res) => res.json({
     assert.equal((await login('', undefined, true)).status, 401);
     // Regression: an enrolled key with a missing/false flag previously bypassed login MFA.
     const adminRow = stores.User.find(x => x.kind === 'admin'); adminRow.mfaEnabled = false;
-    const rejected = await login('', undefined, true); assert.equal(rejected.status,401); assert.equal(rejected.cookie,undefined);
+    const rejected = await login('', undefined, true); assert.equal(rejected.status,401); assert.equal(rejected.cookie,'portfolio_session=');
     assert.equal((await login('', '123abc', true)).status,401);
-    assert.equal((await login('', adminEnabled.data.recoveryCodes[0], true)).status, 200);
+    const verifiedAdmin = await login('', adminEnabled.data.recoveryCodes[0], true); assert.equal(verifiedAdmin.status, 200);
+    const adminAttempt = await call('/api/auth/admin/login', { ...verifiedAdmin, method: 'POST', body: { password: 'security-fixture-admin', tabToken: crypto.randomUUID() } });
+    assert.equal(adminAttempt.status,401);
+    assert.equal((await call('/api/auth/session', verifiedAdmin)).data.authenticated,false);
+    assert.equal((await call('/api/posts', verifiedAdmin)).status,401);
     const isolatedMfa = require('./mfa')(require('./models/PortfolioUser'),require('./models/PortfolioSession'),{});
     for (let i=0;i<10;i++) assert.equal(await isolatedMfa.verify({...adminRow},'invalid'),false);
     await assert.rejects(isolatedMfa.verify({...adminRow},'invalid'),e=>e.code==='MFA_RATE_LIMITED');

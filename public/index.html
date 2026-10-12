@@ -14,7 +14,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@300;400;500;600;700;800;900&family=Noto+Serif+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css?v=4">
   <link rel="stylesheet" href="/css/brand.css">
-  <script src="/js/auth-ui.js?v=3" defer></script>
+  <script src="/js/auth-ui.js?v=4" defer></script>
   <script src="/js/password-visibility.js?v=1" defer></script>
   <script src="/js/security-ui.js?v=1" defer></script>
   <link rel="stylesheet" href="/css/password-visibility.css?v=1">
@@ -71,7 +71,7 @@
         <h2>다시 만나 반가워요.</h2><p>나만의 작업 아카이브에 로그인하세요.</p>
         <label for="loginUsername">아이디</label><input id="loginUsername" name="username" autocomplete="username" maxlength="30" required>
         <label for="loginPassword">비밀번호</label><input id="loginPassword" name="password" type="password" autocomplete="current-password" maxlength="128" required>
-        <label for="loginSecondFactor">2단계 인증 코드 <span class="optional-label">설정한 경우</span></label><input id="loginSecondFactor" name="code" autocomplete="one-time-code" maxlength="35" placeholder="인증 앱 6자리 또는 복구 코드">
+        <label for="loginSecondFactor">2단계 인증 코드 <span class="optional-label">등록한 계정은 필수</span></label><input id="loginSecondFactor" name="code" autocomplete="one-time-code" maxlength="35" placeholder="인증 앱 6자리 또는 복구 코드">
         <label class="remember-option"><input type="checkbox" name="remember"><span>로그인 유지</span></label>
         <p class="auth-hint">선택하면 브라우저 사용 중 로그인을 유지합니다. 30분간 활동이 없으면 자동 로그아웃됩니다.</p>
         <p class="auth-error" role="status" hidden></p><button type="submit" class="auth-submit">내 아카이브 열기 <span aria-hidden="true">↗</span></button>
@@ -88,7 +88,7 @@
       <form class="auth-form" id="adminLoginForm" data-auth-view="admin" hidden>
         <h2>관리자 아카이브</h2><p>기존 관리자 비밀번호로 접속하세요.<br>지금까지 등록한 게시물이 그대로 연결됩니다.</p>
         <label for="ownerPassword">관리자 비밀번호</label><input id="ownerPassword" name="password" type="password" autocomplete="current-password" maxlength="128" required>
-        <label for="adminSecondFactor">2단계 인증 코드 <span class="optional-label">설정한 경우</span></label><input id="adminSecondFactor" name="code" autocomplete="one-time-code" maxlength="35" placeholder="인증 앱 6자리 또는 복구 코드">
+        <label for="adminSecondFactor">2단계 인증 코드 <span class="optional-label">등록한 계정은 필수</span></label><input id="adminSecondFactor" name="code" autocomplete="one-time-code" maxlength="35" placeholder="인증 앱 6자리 또는 복구 코드">
         <label class="remember-option"><input type="checkbox" name="remember"><span>로그인 유지</span></label>
         <p class="auth-hint">30분간 활동이 없으면 자동 로그아웃됩니다.</p>
         <p class="auth-error" role="status" hidden></p><button type="submit" class="auth-submit">관리자 로그인 <span aria-hidden="true">↗</span></button>

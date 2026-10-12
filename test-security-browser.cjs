@@ -35,7 +35,16 @@ const { generateSync } = require('otplib');
       await page.locator('#loginUsername').fill(username); await page.locator('#loginPassword').fill('fixture-browser-pass'); await page.locator('#loginForm button[type=submit]').click();
       await page.locator('#loginForm .auth-error').waitFor({ state: 'visible' }); assert.match(await page.locator('#loginForm .auth-error').textContent(), /2단계/);
       await page.locator('#loginSecondFactor').fill(recoveryCodes[0]); await page.locator('#loginForm button[type=submit]').click();
-      await page.locator('#authScreen').waitFor({ state: 'hidden' }); await page.evaluate(() => { location.hash = 'mypage/account'; });
+      await page.locator('#authScreen').waitFor({ state: 'hidden' });
+      const denied = await page.evaluate(async ({ username }) => {
+        const response = await window.portfolioAuth.fetch('/api/auth/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username,password:'fixture-browser-pass',tabToken:crypto.randomUUID(),remember:true}) });
+        await window.portfolioAuth.refresh(); return response.status;
+      }, { username });
+      assert.equal(denied,401); assert.equal(await page.evaluate(() => window.portfolioAuth.user),null);
+      await page.locator('#authScreen').waitFor({state:'visible'});
+      await page.locator('#loginUsername').fill(username); await page.locator('#loginPassword').fill('fixture-browser-pass'); await page.locator('#loginSecondFactor').fill(recoveryCodes[2]);
+      await page.locator('#loginForm button[type=submit]').click(); await page.locator('#authScreen').waitFor({state:'hidden'});
+      await page.evaluate(() => { location.hash = 'mypage/account'; });
       await security.getByRole('button', { name: '2단계 인증 해제', exact: true }).waitFor();
       await security.locator('input[type=password]').fill('fixture-browser-pass'); await security.locator('input[autocomplete=one-time-code]').fill(recoveryCodes[1]);
       await security.getByRole('button', { name: '2단계 인증 해제', exact: true }).click(); await security.getByRole('button', { name: '인증 앱 연결 시작', exact: true }).waitFor();

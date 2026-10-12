@@ -1,7 +1,7 @@
 (() => {
   const screen = document.querySelector('#authScreen');
   const forms = document.querySelectorAll('.auth-form');
-  let user = null, epoch = 0, lastActivity = Date.now(), lastCheck = 0, pendingRefresh = null;
+  let user = null, epoch = 0, lastActivity = Date.now(), lastCheck = 0, pendingRefresh = null, loggingIn = false;
   let tabToken = sessionStorage.getItem('portfolioTabToken') || '';
   const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('private-portfolio-auth') : null;
   const safeFetch = (url, options = {}) => {
@@ -28,6 +28,7 @@
     return data;
   }
   async function refresh() {
+    if (loggingIn) return;
     if (pendingRefresh) return pendingRefresh;
     const version = epoch;
     pendingRefresh = (async () => {
@@ -74,6 +75,7 @@
     button.disabled = true;
     try {
       if (name !== 'register') {
+        loggingIn = true; ++epoch; setUser(null);
         tabToken = crypto.randomUUID(); sessionStorage.setItem('portfolioTabToken', tabToken);
         values.tabToken = tabToken; values.remember = form.querySelector('[name=remember]').checked;
       }
@@ -91,10 +93,11 @@
         window.scrollTo({ top: 0, behavior: 'instant' });
       }
     } catch (error) {
+      if (name !== 'register') { ++epoch; setUser(null); }
       notice.textContent = error.message; notice.hidden = false;
       if (error.mfaRequired) { const code = form.querySelector('[name=code]'); if (code) { code.required = true; code.focus(); } }
     }
-    finally { button.disabled = false; }
+    finally { loggingIn = false; button.disabled = false; }
   }));
   async function logout() {
     ++epoch;
