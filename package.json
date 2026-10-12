@@ -1,6 +1,6 @@
 {
   "name": "creative-work-archive",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "사진과 동영상으로 기록하는 MongoDB 포트폴리오",
   "main": "server.js",
   "scripts": {

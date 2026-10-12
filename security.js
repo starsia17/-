@@ -25,10 +25,28 @@ function configureSecurity(app) {
     if (req.originalUrl.length > 4096) return res.status(414).send('요청 주소가 너무 깁니다.');
     next();
   });
-  // Apply before JSON parsing and database lookups. Static assets remain separately cacheable.
-  app.use('/api', createRateLimit({ limit: 600, windowMs: 60000 }));
-  app.use('/api', createRateLimit({ limit: 100, windowMs: 1000, maxKeys: 1, key: () => 'instance' }));
-  app.use('/api', createConcurrencyLimit(40));
+  const health = req => req.method === 'GET' && req.originalUrl.split('?')[0] === '/api/health';
+  const outsideHealth = limiter => (req, res, next) => health(req) ? next() : limiter(req, res, next);
+  // Cheap health checks have a separate budget, so busy media/API slots cannot starve probes.
+  const healthGlobal = createRateLimit({ limit: 20, windowMs: 1000, maxKeys: 1, key: () => 'health' });
+  const healthIp = createRateLimit({ limit: 60, windowMs: 60000 });
+  app.use((req, res, next) => {
+    if (!health(req)) return next();
+    if (req.headers['transfer-encoding'] || (req.headers['content-length'] && req.headers['content-length'] !== '0')) return res.status(400).end();
+    healthGlobal(req, res, () => healthIp(req, res, next));
+  });
+  // All paths, including static files and unknown paths, are bounded before parsing or DB work.
+  app.use(outsideHealth(createTokenBucket({ capacity: 300, refillPerSecond: 150, maxKeys: 1, key: () => 'instance' })));
+  app.use(outsideHealth(createConcurrencyLimit(128)));
+  app.use('/api', (req, res, next) => {
+    res.set('Cache-Control', 'private, no-store');
+    next();
+  });
+  // Global admission precedes per-IP accounting to limit map growth under distributed floods.
+  app.use('/api', outsideHealth(createTokenBucket({ capacity: 120, refillPerSecond: 60, maxKeys: 1, key: () => 'api' })));
+  app.use('/api', outsideHealth(createRateLimit({ limit: 600, windowMs: 60000 })));
+  app.use('/api', outsideHealth(createConcurrencyLimit(40)));
+  app.use('/api', outsideHealth(createIpConcurrencyLimit(24)));
   app.use('/api', (req, res, next) => {
     res.set('Cache-Control', 'private, no-store');
     res.vary('Cookie'); res.vary('X-Portfolio-Tab');
@@ -56,6 +74,69 @@ function createConcurrencyLimit(limit) {
     let released = false;
     const release = () => { if (!released) { released = true; --active; } };
     res.once('finish', release); res.once('close', release); next();
+  };
+}
+
+function createIpConcurrencyLimit(limit) {
+  const active = new Map();
+  return (req, res, next) => {
+    const id = req.ip, count = active.get(id) || 0;
+    if (count >= limit) {
+      res.set('Retry-After', '2');
+      return res.status(503).json({ success: false, message: '동시 접속 요청이 많습니다. 잠시 후 다시 시도해주세요.' });
+    }
+    active.set(id, count + 1);
+    let released = false;
+    const release = () => {
+      if (released) return; released = true;
+      const remaining = (active.get(id) || 1) - 1;
+      if (remaining) active.set(id, remaining); else active.delete(id);
+    };
+    res.once('finish', release); res.once('close', release); next();
+  };
+}
+
+function createBodyBudget({ limitBytes = 16 * 1024 * 1024, maxRequestBytes = 4 * 1024 * 1024 } = {}) {
+  let reserved = 0;
+  return (req, res, next) => {
+    if (!req.is('application/json') || (!req.headers['content-length'] && !req.headers['transfer-encoding'])) return next();
+    const length = Number(req.headers['content-length']);
+    if (req.headers['content-length'] !== undefined && (!Number.isSafeInteger(length) || length < 0)) return res.status(400).json({ success: false, message: '요청 크기 형식이 올바르지 않습니다.' });
+    if (length > maxRequestBytes) return res.status(413).json({ success: false, message: '요청이 허용 크기를 초과했습니다.' });
+    const cost = req.headers['transfer-encoding'] ? maxRequestBytes : Math.max(0, length);
+    if (reserved + cost > limitBytes) {
+      res.set('Retry-After', '2');
+      return res.status(503).json({ success: false, message: '큰 요청이 처리 중입니다. 잠시 후 다시 시도해주세요.' });
+    }
+    reserved += cost;
+    let released = false;
+    const release = () => { if (!released) { released = true; reserved -= cost; } };
+    res.once('finish', release); res.once('close', release); next();
+  };
+}
+
+function createTokenBucket({ capacity, refillPerSecond, maxKeys = 10000, key = req => req.ip, clock = () => performance.now() }) {
+  if (!(capacity > 0) || !(refillPerSecond > 0) || !(maxKeys > 0)) throw Error('Invalid request bucket limits');
+  const buckets = new Map();
+  const idleMs = Math.max(60000, capacity / refillPerSecond * 1000);
+  let lastSweep = -Infinity;
+  return (req, res, next) => {
+    const now = clock();
+    if (now - lastSweep >= 60000) {
+      for (const [id, value] of buckets) if (now - value.seen >= idleMs) buckets.delete(id);
+      lastSweep = now;
+    }
+    const id = key(req);
+    let value = buckets.get(id);
+    if (!value) {
+      if (buckets.size >= maxKeys) return deny(res, 1000);
+      value = { tokens: capacity, seen: now };
+      buckets.set(id, value);
+    }
+    value.tokens = Math.min(capacity, value.tokens + Math.max(0, now - value.seen) / 1000 * refillPerSecond);
+    value.seen = now;
+    if (value.tokens < 1) return deny(res, (1 - value.tokens) / refillPerSecond * 1000);
+    --value.tokens; next();
   };
 }
 
@@ -103,4 +184,4 @@ async function verifiedMediaType(file) {
   return detected;
 }
 
-module.exports = { configureSecurity, createRateLimit, createConcurrencyLimit, verifiedMediaType, production };
+module.exports = { configureSecurity, createRateLimit, createConcurrencyLimit, createIpConcurrencyLimit, createTokenBucket, createBodyBudget, verifiedMediaType, production };

@@ -10,7 +10,7 @@ const { configureMongoose, connectionOptions } = require('./mongo-security');
 configureMongoose(mongoose);
 const multer = require('multer');
 const sanitizeHtml = require('sanitize-html');
-const { configureSecurity, verifiedMediaType, production } = require('./security');
+const { configureSecurity, verifiedMediaType, production, createBodyBudget } = require('./security');
 const PortfolioPost = require('./models/PortfolioPost');
 const PortfolioUser = require('./models/PortfolioUser');
 const PortfolioSession = require('./models/PortfolioSession');
@@ -36,6 +36,12 @@ const inlineMediaTypes = new Set([
 
 fs.mkdirSync(TEMP_UPLOAD_DIR, { recursive: true });
 configureSecurity(app);
+app.get('/api/health', (req, res) => {
+  const connected = mongoose.connection.readyState === 1;
+  res.status(connected ? 200 : 503).json({ database: connected ? 'connected' : 'disconnected',
+    version: require('./package.json').version, commit: /^[a-f\d]{40}$/i.test(process.env.RENDER_GIT_COMMIT || '') ? process.env.RENDER_GIT_COMMIT : null });
+});
+app.use(createBodyBudget());
 app.use('/api/auth', express.json({ limit: '16kb' }));
 app.use('/api/account/security', express.json({ limit: '16kb' }));
 app.use(express.json({ limit: '4mb' }));
@@ -46,17 +52,12 @@ server.keepAliveTimeout = 5000;
 server.maxHeadersCount = 100;
 server.maxConnections = 256;
 server.maxRequestsPerSocket = 1000;
+server.setTimeout(45000, socket => socket.destroy());
 app.use('/api', async (req, res, next) => {
   if (Date.now() - lastTrashPurgeAt < 60 * 1000) return next();
   lastTrashPurgeAt = Date.now();
   try { await purgeExpiredTrash(); } catch (err) { console.error('휴지통 정리 실패:', err.message); }
   next();
-});
-
-app.get('/api/health', (req, res) => {
-  const connected = mongoose.connection.readyState === 1;
-  res.status(connected ? 200 : 503).json({ database: connected ? 'connected' : 'disconnected',
-    version: '1.0.0', commit: /^[a-f\d]{40}$/i.test(process.env.RENDER_GIT_COMMIT || '') ? process.env.RENDER_GIT_COMMIT : null });
 });
 
 const storage = multer.diskStorage({
@@ -80,6 +81,8 @@ const upload = {
         return res.status(429).json({ success: false, message: '업로드가 진행 중입니다. 잠시 후 다시 시도해주세요.' });
       }
       ++activeUploads; uploadingUsers.add(user);
+      // Only authenticated, admitted multipart uploads keep the existing longer timeout.
+      if (req.is('multipart/form-data')) req.setTimeout(300000);
       let released = false;
       const release = () => { if (!released) { released = true; --activeUploads; uploadingUsers.delete(user); } };
       res.once('finish', release); res.once('close', release);
@@ -551,6 +554,8 @@ async function streamMedia(req, res, rawId) {
       if (res.headersSent) res.destroy(error);
       else res.status(404).end();
     });
+    // Stop GridFS work when a client aborts a download instead of reading unused bytes.
+    res.once('close', () => download.destroy());
     download.pipe(res.status(status));
   } catch (error) { if (res.headersSent) res.destroy(error); else res.status(500).json({ success: false, message: '미디어 파일을 불러오지 못했습니다.' }); }
 }
