@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { chromium } = require('playwright');
-const base = 'http://127.0.0.1:4099';
+const base = 'http://127.0.0.1:'+(process.env.CAREER_FIXTURE_PORT||4099);
 const output = process.env.CAREER_TEST_OUTPUT || '/tmp/portfoliv-browser-checks';
 fs.mkdirSync(output, { recursive: true });
 async function edit(locator, html) { await locator.evaluate((el, value) => { el.innerHTML = value; el.dispatchEvent(new Event('input', { bubbles: true })); }, html); }
@@ -20,10 +20,10 @@ async function checkWidth(page) { assert(await page.evaluate(() => document.docu
       page.on('dialog', dialog => dialog.accept());
       await page.goto(base + '/#mypage/resume');
       await page.waitForFunction(() => !document.querySelector('.career-profile-form button[type=submit]')?.disabled);
-      const profile = page.locator('.career-profile-form'), resumeEditor = profile.locator('.rich-editor');
+      const profile = page.locator('.career-profile-form'), resumeEditor = profile.getByRole('textbox',{name:'이력서 본문',exact:true});
       await edit(resumeEditor, '<h2>편집 내용 보존</h2><p>저장 전 내용도 출력</p>');
       await resumeEditor.evaluate(el => { el.focus(); const range = document.createRange(); range.selectNodeContents(el.querySelector('h2')); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); });
-      await profile.locator('[data-font-step="1"]').click();
+      await profile.locator('.career-writing-section [data-font-step="1"]').click();
       const draft = await resumeEditor.innerHTML();
       const popPromise = page.waitForEvent('popup');
       await page.getByRole('button', { name: '이력서 PDF 저장', exact: true }).click();
@@ -38,7 +38,7 @@ async function checkWidth(page) { assert(await page.evaluate(() => document.docu
       await route(page, 'mypage/resume'); await profile.waitFor({ state: 'visible' });
       assert.equal(await resumeEditor.innerHTML(), draft, 'Switching tabs discarded the draft');
       await profile.getByRole('button', { name: '프로필 저장', exact: true }).click();
-      await page.waitForFunction(() => document.querySelector('.career-profile-form [role=status]').textContent.includes('저장했습니다'));
+      await page.waitForFunction(() => document.querySelector('.career-profile-status').textContent.includes('저장했습니다'));
       await checkWidth(page);
 
       await route(page, 'portfolios/new'); await page.locator('#portfolioBuilderForm').waitFor({ state: 'visible' });
@@ -61,11 +61,11 @@ async function checkWidth(page) { assert(await page.evaluate(() => document.docu
       await select.selectOption(second); assert.equal(await note.innerText(), '두 번째 별도 설명');
       await choices.nth(1).uncheck(); await choices.nth(1).check();
       await select.selectOption(second); assert.equal(await note.innerText(), '두 번째 별도 설명');
-      const resumeBox = form.locator('details').first(); await resumeBox.locator('summary').click();
+      const resumeBox = form.locator('details').first(); await resumeBox.locator(':scope > summary').click();
       const include = resumeBox.locator('input[type=checkbox]'); await include.check();
       await resumeBox.getByRole('button', { name: '마이페이지 프로필 가져오기', exact: true }).click();
       await page.waitForFunction(() => document.querySelector('#portfolioBuilderForm input[name=name]').disabled === false && document.querySelector('#portfolioBuilderForm [aria-label="이력서 본문"]').textContent.includes('편집 내용 보존'));
-      assert((await resumeBox.locator('.rich-editor').innerText()).includes('편집 내용 보존'));
+      assert((await resumeBox.getByRole('textbox',{name:'이력서 본문',exact:true}).innerText()).includes('편집 내용 보존'));
       await resumeBox.locator('input[name=email]').fill('invalid'); await include.uncheck();
       await form.locator('input[name=targetCompany]').fill('회사 ' + width);
       await form.locator('input[name=targetRole]').fill('디자인');
@@ -140,7 +140,7 @@ async function checkWidth(page) { assert(await page.evaluate(() => document.docu
     assert.equal(await modal.locator('[data-url]').inputValue(), ''); await modal.locator('[data-close]').click();
     // Late import and preview responses must never cross an account transition.
     await route(page, 'portfolios/new'); await page.locator('#portfolioBuilderForm').waitFor({ state: 'visible' });
-    const box = page.locator('#portfolioBuilderForm details').first(); await box.locator('summary').click(); await box.locator('input[type=checkbox]').check();
+    const box = page.locator('#portfolioBuilderForm details').first(); await box.locator(':scope > summary').click(); await box.locator('input[type=checkbox]').check();
     let release, started, importDone;
     const arriving = new Promise(resolve => { started = resolve; });
     const delayed = new Promise(resolve => { release = resolve; });

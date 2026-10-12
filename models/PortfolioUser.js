@@ -8,6 +8,7 @@ const schema = new mongoose.Schema({
   canWriteNews: { type: Boolean, default: false },
   careerProfile: { type: mongoose.Schema.Types.Mixed, default: null },
   careerRevision: { type: Number, default: 0 },
+  careerTemplates: { type: [{ fileId: mongoose.Schema.Types.ObjectId, name:String, size:Number, format:String, kind:{type:String,enum:['template','filled']}, sourceId:mongoose.Schema.Types.ObjectId, creationKey:String, company:String, editState:mongoose.Schema.Types.Mixed, createdAt:Date }], default: [] },
   mfaEnabled: { type: Boolean, default: false },
   mfaSecret: { type: String, select: false },
   mfaLastStep: { type: Number, default: -1 },

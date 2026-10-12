@@ -11,14 +11,14 @@ const copy = x => x == null ? x : x instanceof Types.ObjectId ? new Types.Object
 function matches(row, query) {
   return Object.entries(query).every(([key, value]) => {
     if (key === '$or') return value.some(q => matches(row, q));
-    const actual = row[key];
+    const path=key.split('.');function values(value,parts){if(!parts.length)return [value];if(Array.isArray(value)&&!/^\d+$/.test(parts[0]))return value.flatMap(item=>values(item,parts));return values(value?.[parts[0]],parts.slice(1));}const all=values(row,path);const actual=all[0];
     if (value && typeof value === 'object' && !(value instanceof Date)) {
       if ('$in' in value) return value.$in.some(v => String(v) === String(actual));
-      if ('$ne' in value) return actual != value.$ne;
+      if ('$ne' in value) return all.every(actual=>String(actual)!==String(value.$ne));
       if ('$gt' in value) return actual > value.$gt;
       if ('$exists' in value) return (actual !== undefined) === value.$exists;
     }
-    return value == null ? actual == null : String(value) === String(actual);
+    return value == null ? actual == null : all.some(actual=>String(value)===String(actual));
   });
 }
 function model(rows = []) {
@@ -27,7 +27,7 @@ function model(rows = []) {
     countDocuments:q=>Promise.resolve(rows.filter(row=>matches(row,q)).length),
     create:async values=> { if(rows.some(row=>values.creationKey && row.creationKey===values.creationKey && row.ownerId===values.ownerId)) throw Object.assign(Error('duplicate'),{code:11000});
       const row={_id:crypto.randomBytes(12).toString('hex'),revision:0,createdAt:new Date(),updatedAt:new Date(),deletedAt:null,expiresAt:null,...copy(values)}; rows.push(row);return copy(row); },
-    findOneAndUpdate:(q,changes,opts={})=>query(()=>{let row=rows.find(row=>matches(row,q)); if(!row&&opts.upsert){row={_id:crypto.randomBytes(12).toString('hex'),...copy(changes.$setOnInsert)};rows.push(row);} if(!row)return null;Object.assign(row,copy(changes.$set||{})); for(const [key,by]of Object.entries(changes.$inc||{}))row[key]=(row[key]||0)+by;row.updatedAt=new Date();return row;}),
+    findOneAndUpdate:(q,changes,opts={})=>query(()=>{let row=rows.find(row=>matches(row,q)); if(!row&&opts.upsert){row={_id:crypto.randomBytes(12).toString('hex'),...copy(changes.$setOnInsert)};rows.push(row);} if(!row)return null;Object.assign(row,copy(changes.$set||{})); for(const [key,by]of Object.entries(changes.$inc||{}))row[key]=(row[key]||0)+by;for(const[key,val]of Object.entries(changes.$push||{}))(row[key]||=[]).push(copy(val));for(const[key,val]of Object.entries(changes.$pull||{}))row[key]=(row[key]||[]).filter(item=>!matches(item,val));row.updatedAt=new Date();return row;}),
     findOneAndDelete:q=>query(()=>{const i=rows.findIndex(row=>matches(row,q));return i<0?null:rows.splice(i,1)[0];}),
     deleteMany:async q=>{for(let i=rows.length-1;i>=0;i--)if(matches(rows[i],q))rows.splice(i,1);},deleteOne:async q=>{const i=rows.findIndex(row=>matches(row,q));if(i>=0)rows.splice(i,1);} };
   return Model;
@@ -39,6 +39,16 @@ const collections=model(),shares=model();
 const app=express();require('./security').configureSecurity(app);app.use(express.json({limit:'4mb'}));
 const requireUser=(req,res,next)=>{req.user={_id:req.headers['x-fixture-user']||alice};next();};
 require('./career-profile')(app,users,requireUser,sanitizeRichText,plain);
+require('./career-pdf-assets')(app);
+const fixtureDir=fs.mkdtempSync(require('node:path').join(require('node:os').tmpdir(),'career-files-')),pdfFiles=new Map();
+require('./career-templates')(app,users,requireUser,{
+ upload:require('multer')({dest:fixtureDir,limits:{fileSize:20*1024*1024,files:1,fieldSize:350000}}).array('template',1),
+ store:async(file,ids)=>{const id=crypto.randomBytes(12).toString('hex');ids.push(id);pdfFiles.set(id,fs.readFileSync(file.path));return {fileId:id};},
+ stream:async(req,res,id)=>{const bytes=pdfFiles.get(String(id));if(!bytes)return res.sendStatus(404);res.type('pdf').send(bytes);},
+ cleanupTemp:async files=>{for(const file of files)try{fs.unlinkSync(file.path);}catch{}},
+ cleanupFiles:async ids=>{for(const id of ids)pdfFiles.delete(String(id));}
+});
+
 require('./portfolio-builder')(app,collections,posts,requireUser,p=>p,shares,sanitizeRichText,plain);
 const fixtureImage = fs.readFileSync('public/assets/favicon.png');
 require('./sharing')(app,shares,posts,collections,requireUser,(req,res)=>res.type('png').send(fixtureImage));
@@ -54,7 +64,7 @@ app.use(express.static('public'));
 app.use('/assets',express.static('../github-checkout/public/assets'));
 app.use((err,req,res,next)=>res.status(500).json({success:false,message:err.message}));
 (async()=>{
-  const server=app.listen(process.argv.includes('--serve')?4099:0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));
+  const server=app.listen(process.argv.includes('--serve')?Number(process.env.CAREER_FIXTURE_PORT||4099):0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));
   const base='http://127.0.0.1:'+server.address().port;
   async function call(url,method='GET',body,user=alice){const r=await fetch(base+url,{method,headers:{'Content-Type':'application/json','x-fixture-user':user},body:body?JSON.stringify(body):undefined});return {status:r.status,data:await r.json()};}
   try {
@@ -101,6 +111,28 @@ app.use((err,req,res,next)=>res.status(500).json({success:false,message:err.mess
     assert.equal((await call('/api/shared/'+shared.data.token+'/media/444444444444444444444444')).status,404);
     await call('/api/portfolios/'+duplicateId,'DELETE');assert.equal((await call('/api/portfolios/'+duplicateId)).status,404);await call('/api/trash/portfolios/'+duplicateId+'/restore','POST');assert.equal((await call('/api/portfolios/'+duplicateId)).data.portfolio.projectNotes[0].bodyHtml,'<p>회사별 설명</p>');
     await call('/api/portfolios/'+id,'DELETE');assert.equal((await call('/api/shared/'+shared.data.token)).status,404);await call('/api/trash/portfolios/'+id+'/restore','POST');
+    // New upper fields preserve rich formatting and remain intact for older clients.
+    const detailed={...profile,birthDate:'1995-02-28',address:'서울',experienceHtml:'<p style="font-weight:700">경력 서식</p>',educationHtml:'<p>교육</p>',skillsHtml:'<p>도구</p>',credentialsHtml:'<p>자격</p>'};
+    let revision=(await call('/api/career-profile')).data.revision;
+    const detailSaved=await call('/api/career-profile','PATCH',{profile:detailed,revision});assert.equal(detailSaved.status,200);
+    revision=detailSaved.data.revision;const oldSaved=await call('/api/career-profile','PATCH',{profile,revision});assert.equal(oldSaved.status,200);assert.equal(oldSaved.data.profile.experienceHtml,detailed.experienceHtml);assert.equal(oldSaved.data.profile.birthDate,detailed.birthDate);
+    revision=oldSaved.data.revision;assert.equal((await call('/api/career-profile','PATCH',{profile:{...detailed,birthDate:'2025-02-30'},revision})).status,400);
+    const PDFDocument=require('pdf-lib').PDFDocument,doc=await PDFDocument.create();doc.addPage();const pdf=await doc.save();
+    async function uploadPdf(key=crypto.randomUUID(),extra={},user=alice,bytes=pdf){const form=new FormData();form.append('template',new Blob([bytes],{type:'application/pdf'}),'fixture.pdf');form.append('creationKey',key);for(const[k,v]of Object.entries(extra))form.append(k,v);const response=await fetch(base+'/api/career-templates',{method:'POST',headers:{'x-fixture-user':user},body:form});return {status:response.status,data:await response.json()};}
+    const key=crypto.randomUUID(),original=await uploadPdf(key);assert.equal(original.status,201);const fileId=original.data.file.id;
+    assert.equal((await uploadPdf(key)).data.file.id,fileId);assert.equal(pdfFiles.size,1);
+    assert.equal((await call('/api/career-templates/'+fileId,'GET',null,bob)).status,404);assert.equal((await call('/api/career-templates/'+fileId+'/state','GET',null,bob)).status,404);assert.equal((await call('/api/career-templates/'+fileId,'DELETE',null,bob)).status,404);
+    assert.equal((await uploadPdf(crypto.randomUUID(),{},alice,Buffer.from('not pdf'))).status,400);
+    const filled=await uploadPdf(crypto.randomUUID(),{sourceId:fileId,kind:'filled',editState:JSON.stringify({fields:[{name:'name',value:'홍길동'}],overlays:[]})});assert.equal(filled.status,201);
+    assert.equal((await call('/api/career-templates/'+fileId,'DELETE')).status,409);
+    assert.equal((await uploadPdf(crypto.randomUUID(),{sourceId:fileId,kind:'filled'},bob)).status,404);
+    assert.equal((await uploadPdf(crypto.randomUUID(),{editState:JSON.stringify({fields:[],overlays:[{id:'bad',text:'x',page:0,x:-1,y:1,width:50,fontSize:12}]})})).status,400);
+    assert.equal((await call('/api/career-templates/'+filled.data.file.id,'DELETE')).status,200);assert.equal((await call('/api/career-templates/'+fileId,'DELETE')).status,200);assert.equal(pdfFiles.size,0);
+    for(let i=0;i<10;i++)assert.equal((await uploadPdf()).status,201);assert.equal((await uploadPdf()).status,409);
+    for(const item of (await call('/api/career-templates')).data.files)await call('/api/career-templates/'+item.id,'DELETE');assert.equal(pdfFiles.size,0);
+    const User=require('./models/PortfolioUser');for(const filter of [{_id:alice,'careerTemplates.9':{$exists:false},'careerTemplates.creationKey':{$ne:key}},{_id:alice,'careerTemplates.fileId':fileId,'careerTemplates.sourceId':{$ne:fileId}}])assert.doesNotThrow(()=>User.findOne(filter).cast(User));
+    assert.equal((await call('/api/shared/'+shared.data.token)).status,404);
+    console.log('PASS: resume upper fields/date/legacy preservation; private PDF upload, signature, idempotency, owner access, drafts, dependencies, limits, deletion and Mongoose query casting');
     console.log('PASS: private profile, sanitization, validation, owner isolation, idempotency, copy independence, revisions, preview parity, sharing revocation and restore');
     if(process.argv.includes('--serve'))console.log('Local fixture ready: '+base);else server.close();
   } catch(error){console.error(error);server.close();process.exitCode=1;}

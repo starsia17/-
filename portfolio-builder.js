@@ -1,4 +1,4 @@
-const { rich, resume } = require('./career-content');
+const { rich, resume, resumeSize } = require('./career-content');
 module.exports = function mount(app, Collection, Post, requireUser, serializePost, Share, sanitize, plain) {
   const validId = id => typeof id === 'string' && /^[a-f\d]{24}$/i.test(id);
   const summary = item => ({ id: String(item._id), title: item.title, introduction: item.introduction,
@@ -26,8 +26,8 @@ module.exports = function mount(app, Collection, Post, requireUser, serializePos
       if (!Array.isArray(notes) || notes.length > 200 || notes.some(note => !note || !validId(note.postId) || !body.postIds.some(id => id.toLowerCase() === note.postId.toLowerCase())) || new Set(notes.map(note => note.postId.toLowerCase())).size !== notes.length) return null;
       const projectNotes = notes.map(note => ({ postId: note.postId.toLowerCase(), bodyHtml: rich(note.bodyHtml, sanitize, plain) }));
       const profileValue = value('resume', null);
-      const profile = profileValue == null ? null : resume(profileValue, sanitize, plain);
-      if (introductionHtml.length + projectNotes.reduce((sum, note) => sum + note.bodyHtml.length, 0) + (profile?.bodyHtml.length || 0) > 600000) return null;
+      const profile = profileValue == null ? null : resume(profileValue, sanitize, plain, existing.resume||{});
+      if (introductionHtml.length + projectNotes.reduce((sum, note) => sum + note.bodyHtml.length, 0) + resumeSize(profile) > 600000) return null;
       return { title: body.title.trim(), introduction: body.introduction.trim(), introductionHtml, targetCompany: targetCompany.trim(), targetRole: targetRole.trim(),
         resume: profile, projectNotes, layout: body.layout, postIds: [...selected] };
     } catch { return null; }

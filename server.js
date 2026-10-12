@@ -42,6 +42,7 @@ app.get('/api/health', (req, res) => {
     version: require('./package.json').version, commit: /^[a-f\d]{40}$/i.test(process.env.RENDER_GIT_COMMIT || '') ? process.env.RENDER_GIT_COMMIT : null });
 });
 app.use(createBodyBudget());
+require('./career-pdf-assets')(app);
 app.use('/api/auth', express.json({ limit: '16kb' }));
 app.use('/api/account/security', express.json({ limit: '16kb' }));
 app.use(express.json({ limit: '4mb' }));
@@ -64,16 +65,17 @@ const storage = multer.diskStorage({
   destination: (req, file, callback) => callback(null, TEMP_UPLOAD_DIR),
   filename: (req, file, callback) => callback(null, crypto.randomUUID())
 });
+const uploadLimits={ fileSize: 50 * 1024 * 1024, files: 10, fields: 20, parts: 30, fieldSize: 1024 * 1024, fieldNameSize: 100 };
 const uploadParser = multer({
   storage,
-  limits: { fileSize: 50 * 1024 * 1024, files: 10, fields: 20, parts: 30, fieldSize: 1024 * 1024, fieldNameSize: 100 },
+  limits: uploadLimits,
   fileFilter: (req, file, callback) => callback(null, true)
 });
 let activeUploads = 0;
 const uploadingUsers = new Set();
 const upload = {
-  array(field, count) {
-    const parse = uploadParser.array(field, count);
+  array(field, count, maxBytes) {
+    const parse = (maxBytes?multer({storage,limits:{...uploadLimits,fileSize:maxBytes,files:count}}):uploadParser).array(field, count);
     return (req, res, next) => {
       const user = String(req.user._id);
       if (activeUploads >= 3 || uploadingUsers.has(user)) {
@@ -81,6 +83,7 @@ const upload = {
         return res.status(429).json({ success: false, message: '업로드가 진행 중입니다. 잠시 후 다시 시도해주세요.' });
       }
       ++activeUploads; uploadingUsers.add(user);
+      req.uploadMaxFileSize=maxBytes||uploadLimits.fileSize;
       // Only authenticated, admitted multipart uploads keep the existing longer timeout.
       if (req.is('multipart/form-data')) req.setTimeout(300000);
       let released = false;
@@ -98,6 +101,7 @@ require('./notices')(app, PortfolioNotice, requireUser, sanitizeRichText, plainT
 require('./member-portal')(app, PortfolioUser, PortfolioSession, PortfolioNews, auth);
 require('./portfolio-builder')(app, PortfolioCollection, PortfolioPost, requireUser, serializePost, PortfolioShare, sanitizeRichText, plainTextFromHtml);
 require('./career-profile')(app, PortfolioUser, requireUser, sanitizeRichText, plainTextFromHtml);
+require('./career-templates')(app,PortfolioUser,requireUser,{upload:upload.array('template',1,20*1024*1024),store:storeMediaFile,stream:streamMedia,cleanupTemp:cleanupTempFiles,cleanupFiles:ids=>cleanupGridFsFiles(ids.map(id=>new mongoose.Types.ObjectId(String(id))))});
 require('./sharing')(app, PortfolioShare, PortfolioPost, PortfolioCollection, requireUser, streamMedia);
 
 app.get('/api/posts', requireUser, async (req, res) => {
@@ -396,7 +400,8 @@ async function purgeExpiredTrash() {
 
 async function cleanupExpiredMediaOrphans() {
   if (!mediaBucket) return;
-  const referencedIds = await PortfolioPost.distinct('media.fileId');
+  const [postIds,templateIds] = await Promise.all([PortfolioPost.distinct('media.fileId'),PortfolioUser.distinct('careerTemplates.fileId')]);
+  const referencedIds = [...postIds,...templateIds];
   const cutoff = new Date(Date.now() - TRASH_RETENTION_MS);
   const orphaned = await mediaBucket.find({ uploadDate: { $lt: cutoff }, _id: { $nin: referencedIds } }).project({ _id: 1 }).toArray();
   await cleanupGridFsFiles(orphaned.map(file => file._id));
@@ -482,7 +487,7 @@ app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
   const status = ['PASSWORD_BUSY', 'MFA_RATE_LIMITED'].includes(err.code) ? 429 : err instanceof multer.MulterError ? (err.code === 'LIMIT_FILE_SIZE' ? 413 : 400) : ['entity.too.large'].includes(err.type) ? 413 : err.type === 'entity.parse.failed' ? 400 : err.status === 503 ? 503 : 500;
   let message = status === 413 ? '요청이 허용 크기를 초과했습니다.' : status === 400 ? '입력 형식이나 첨부 제한을 확인해주세요.' : '요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.';
-  if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') message = '파일당 최대 크기는 50MB입니다.';
+  if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') message = '파일당 최대 크기는 '+(req.uploadMaxFileSize||uploadLimits.fileSize)/1024/1024+'MB입니다.';
   if (err.status === 503 || ['PASSWORD_BUSY', 'MFA_RATE_LIMITED'].includes(err.code)) message = err.message;
   if (status === 429) res.set('Retry-After', err.code === 'MFA_RATE_LIMITED' ? '600' : '3');
   if (req.path.startsWith('/api/')) return res.status(status).json({ success: false, message });
@@ -506,7 +511,7 @@ async function start() {
 module.exports = { app, start, sanitizeRichText, auth };
 if (require.main === module) start().catch(error => { console.error('서버 시작 실패:', error.message); process.exit(1); });
 
-async function streamMedia(req, res, rawId) {
+async function streamMedia(req, res, rawId, options = {}) {
   try {
     const fileId = new mongoose.Types.ObjectId(String(rawId));
     const file = await mediaBucket.find({ _id: fileId }).next();
@@ -540,7 +545,7 @@ async function streamMedia(req, res, rawId) {
       res.set('Content-Range', `bytes ${start}-${end}/${file.length}`);
     }
     res.set({
-      'Content-Type': inlineMediaTypes.has(file.metadata?.contentType) ? file.metadata.contentType : 'application/octet-stream',
+      'Content-Type': options.contentType || (inlineMediaTypes.has(file.metadata?.contentType) ? file.metadata.contentType : 'application/octet-stream'),
       'Content-Length': String(Math.max(0, end - start + 1)),
       'Content-Disposition': file.metadata?.kind === 'file'
         ? `attachment; filename*=UTF-8''${encodeURIComponent(file.metadata.originalName || 'download')}`

@@ -8,8 +8,12 @@ module.exports = function mount(app, User, requireUser, sanitize, plain) {
     } catch (error) { next(error); }
   });
   app.patch('/api/career-profile', requireUser, async (req, res, next) => {
-    let values;
-    try { values = resume(req.body.profile, sanitize, plain); }
+    let values,existing;
+    try { existing=await User.findById(req.user._id).select('careerProfile').lean(); } catch(error){return next(error);}
+    try {
+      if(!existing)return res.status(401).json({success:false,message:'다시 로그인해주세요.'});
+      values = resume(req.body.profile, sanitize, plain,existing.careerProfile||{});
+    }
     catch (error) { return res.status(400).json({ success: false, message: error.message }); }
     const revision = req.body.revision;
     if (!Number.isSafeInteger(revision) || revision < 0) return res.status(400).json({ success: false, message: '프로필을 다시 열어서 저장해주세요.' });

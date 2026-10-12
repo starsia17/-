@@ -52,8 +52,11 @@
     const contact = node('div', undefined, 'career-contact');
     if (profile.email) { const a = node('a', profile.email); a.href = 'mailto:' + profile.email; contact.append(a); }
     if (profile.phone) contact.append(node('span', profile.phone));
+    if (profile.birthDate) contact.append(node('span','생년월일: '+profile.birthDate));
+    if (profile.address) contact.append(node('span','주소: '+profile.address));
     if (profile.website) { const a = node('a', profile.website); a.href = profile.website; a.target = '_blank'; a.rel = 'noopener noreferrer'; contact.append(a); }
     section.append(contact);
+    for(const[key,title]of [['experienceHtml','경력 · 활동'],['educationHtml','학력 · 교육'],['skillsHtml','기술 · 사용 도구'],['credentialsHtml','수상 · 자격']])if(profile[key]){const group=node('section',undefined,'career-resume-record');group.append(node('h3',title));const article=node('article',undefined,'blog-article');article.innerHTML=profile[key];group.append(article);section.append(group);}
     if (profile.bodyHtml) { const article = node('article', undefined, 'blog-article'); article.innerHTML = profile.bodyHtml; section.append(article); }
     return section;
   }
