@@ -59,6 +59,7 @@ app.get('/fixture/rate', createRateLimit({ limit: 2 }), (req, res) => res.json({
 (async () => {
   await auth.initializeAdmin(require('./models/PortfolioPost'));
   const serving = process.argv.includes('--serve');
+  if (serving) delete stores.User.find(x=>x.kind==='admin').authVersion;
   const server = app.listen(serving ? 4101 : 0, '127.0.0.1'); await new Promise(resolve => server.once('listening', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   async function call(route, { method = 'GET', body, headers = {}, cookie, tab } = {}) {
@@ -103,6 +104,9 @@ app.get('/fixture/rate', createRateLimit({ limit: 2 }), (req, res) => res.json({
     assert.equal((await call('/api/auth/login', { method: 'POST', body: JSON.stringify({ x: 'x'.repeat(4 * 1024 * 1024) }) })).status, 413);
     assert.equal((await call('/api/auth/login', { method: 'POST', body: { username: { $ne: null }, password: { $ne: null } } })).status, 400);
     for (const username of ['alice', 'bob']) assert.equal((await call('/api/auth/register', { method: 'POST', headers: { Origin: base }, body: { username, password: 'fixture-secure-pass', passwordConfirm: 'fixture-secure-pass' } })).status, 201);
+    // Existing accounts created before versioning have no persisted authVersion.
+    delete stores.User.find(x=>x.username==='alice').authVersion;
+    delete stores.User.find(x=>x.kind==='admin').authVersion;
     const alice = await login('alice'), bob = await login('bob'), admin = await login('', undefined, true);
     assert.equal(alice.status, 200); assert.equal(bob.status, 200); assert.equal(admin.status, 200);
     assert.equal((await call('/api/posts?tab=' + alice.tab, { cookie: alice.cookie })).status, 401);
@@ -113,7 +117,8 @@ app.get('/fixture/rate', createRateLimit({ limit: 2 }), (req, res) => res.json({
     const secret = setup.data.secret; assert.match(secret, /^[A-Z2-7]{32}$/);
     assert.ok(!JSON.stringify(stores.Session).includes(secret));
     assert.equal((await call('/api/account/security/confirm', { ...bob, method: 'POST', body: { code: generateSync({ secret }) } })).status, 400);
-    const enabled = await call('/api/account/security/confirm', { ...alice, method: 'POST', body: { code: generateSync({ secret }) } });
+    const enrollmentCode = generateSync({secret});
+    const enabled = await call('/api/account/security/confirm', { ...alice, method: 'POST', body: { code: enrollmentCode } });
     assert.equal(require('./mfa').requiresMfa({mfaEnabled:false,mfaRecoveryHashes:['registered-hash']}),true);
     assert.equal(enabled.status, 200); assert.equal(enabled.data.recoveryCodes.length, 10);
     // A failed fresh login must revoke the existing verified cookie, not restore it.
@@ -126,7 +131,7 @@ app.get('/fixture/rate', createRateLimit({ limit: 2 }), (req, res) => res.json({
     assert.equal((await login('alice', 'wrong')).status, 401);
     assert.equal((await call('/api/auth/login',{method:'POST',body:{username:'alice',password:'fixture-secure-pass',tabToken:crypto.randomUUID(),remember:true}})).status,401);
     // The enrollment code has already been consumed.
-    assert.equal((await login('alice', generateSync({ secret }))).status, 401);
+    assert.equal((await login('alice', enrollmentCode)).status, 401);
     const future = generateSync({ secret, epoch: Math.floor(Date.now() / 1000) + 30 });
     const races = await Promise.all([login('alice', future), login('alice', future)]);
     assert.deepEqual(races.map(x => x.status).sort(), [200, 401]);

@@ -21,6 +21,10 @@ function decrypt(value, ownerId) {
   return Buffer.concat([cipher.update(data), cipher.final()]).toString('utf8');
 }
 function requiresMfa(user) { return !!user && (user.mfaEnabled === true || (typeof user.mfaSecret === 'string' && user.mfaSecret.length > 0) || (Array.isArray(user.mfaRecoveryHashes) && user.mfaRecoveryHashes.length > 0)); }
+function versionFilter(user) {
+  const version = user.authVersion || 0;
+  return version === 0 ? { $or: [{ authVersion: 0 }, { authVersion: { $exists: false } }] } : { authVersion: version };
+}
 function validCode(code) { return typeof code === 'string' && /^\d{6}$/.test(code); }
 function codeStep(code, secret) {
   if (!validCode(code)) return null;
@@ -54,11 +58,11 @@ module.exports = function createMfa(User, Session, auth) {
     const normalized = typeof code === 'string' ? code.replace(/-/g, '').toLowerCase() : '';
     if (/^[a-f\d]{32}$/.test(normalized)) {
       const recoveryHash = hash(normalized);
-      return accept(await User.findOneAndUpdate({ _id: user._id, mfaSecret: stored.mfaSecret, authVersion: stored.authVersion || 0, mfaRecoveryHashes: recoveryHash }, { $set: { mfaEnabled: true }, $pull: { mfaRecoveryHashes: recoveryHash } }));
+      return accept(await User.findOneAndUpdate({ _id: user._id, mfaSecret: stored.mfaSecret, ...versionFilter(stored), mfaRecoveryHashes: recoveryHash }, { $set: { mfaEnabled: true }, $pull: { mfaRecoveryHashes: recoveryHash } }));
     }
     const step = codeStep(code, decrypt(stored.mfaSecret, user._id));
     if (step === null) return false;
-    return accept(await User.findOneAndUpdate({ _id: user._id, mfaSecret: stored.mfaSecret, authVersion: stored.authVersion || 0, mfaLastStep: { $lt: step } }, { $set: { mfaLastStep: step, mfaEnabled: true } }));
+    return accept(await User.findOneAndUpdate({ _id: user._id, mfaSecret: stored.mfaSecret, ...versionFilter(stored), mfaLastStep: { $lt: step } }, { $set: { mfaLastStep: step, mfaEnabled: true } }));
   }
   async function passwordGate(req, res) {
     if (!await auth.verifyPassword(req.user, req.body.password)) {
@@ -95,7 +99,7 @@ module.exports = function createMfa(User, Session, auth) {
         const step = codeStep(req.body.code, decrypt(session.mfaSetupSecret, req.user._id));
         if (step === null) return res.status(400).json({ success: false, message: '인증 앱의 6자리 코드를 확인해주세요.' });
         const recoveryCodes = Array.from({ length: 10 }, () => crypto.randomBytes(16).toString('hex'));
-        const updated = await User.findOneAndUpdate({ _id: req.user._id, authVersion: req.user.authVersion || 0, mfaEnabled: session.mfaSetupReplacing === true ? true : { $ne: true } }, {
+        const updated = await User.findOneAndUpdate({ _id: req.user._id, ...versionFilter(req.user), mfaEnabled: session.mfaSetupReplacing === true ? true : { $ne: true } }, {
           $set: { mfaEnabled: true, mfaSecret: session.mfaSetupSecret, mfaLastStep: step, mfaRecoveryHashes: recoveryCodes.map(hash) }, $inc: { authVersion: 1 }
         }, { new: true });
         if (!updated) return res.status(409).json({ success: false, message: '계정이 다른 화면에서 변경되었습니다. 다시 로그인해주세요.' });
@@ -112,7 +116,7 @@ module.exports = function createMfa(User, Session, auth) {
       try {
         if (!await passwordGate(req, res)) return;
         if (!req.user.mfaEnabled || !await verify(req.user, req.body.code)) return res.status(400).json({ success: false, message: '인증 코드 또는 미사용 복구 코드를 확인해주세요.' });
-        const updated = await User.findOneAndUpdate({ _id: req.user._id, authVersion: req.user.authVersion || 0, mfaEnabled: true }, {
+        const updated = await User.findOneAndUpdate({ _id: req.user._id, ...versionFilter(req.user), mfaEnabled: true }, {
           $set: { mfaEnabled: false, mfaSecret: null, mfaRecoveryHashes: [], mfaLastStep: -1 }, $inc: { authVersion: 1 }
         }, { new: true });
         if (!updated) return res.status(409).json({ success: false, message: '계정이 다른 화면에서 변경되었습니다. 다시 로그인해주세요.' });
