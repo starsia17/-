@@ -10,7 +10,7 @@ function equal(a, b) {
   const left = Buffer.from(a || ''), right = Buffer.from(b || '');
   return left.length === right.length && crypto.timingSafeEqual(left, right);
 }
-const publicUser = user => ({ id: String(user._id), username: user.kind === 'admin' ? '관리자' : user.username, kind: user.kind, canWriteNews: user.kind === 'admin' || user.canWriteNews === true });
+const publicUser = user => ({ id: String(user._id), username: user.kind === 'admin' ? '관리자' : user.username, kind: user.kind, mfaEnabled: requiresMfa(user), canWriteNews: user.kind === 'admin' || user.canWriteNews === true });
 
 module.exports = function createAuth(User, Session, adminPassword = '') {
   const loginChallenges = new Map();
@@ -78,11 +78,13 @@ module.exports = function createAuth(User, Session, adminPassword = '') {
     const token = crypto.randomBytes(32).toString('hex');
     await Session.create({ tokenHash: digest(token), userId: user._id, tabHash: digest(tab), remember: req.body.remember === true, mfaVerified: verifiedSecondFactor === true, mfaPolicyVersion: 2, authVersion: user.authVersion || 0, lastSeenAt: new Date(), expiresAt: new Date(Date.now() + IDLE_MS) });
     setCookie(res, token);
-    res.json({ success: true, user: publicUser(user), remember: req.body.remember === true });
+    res.json({ success: true, user: publicUser(current), mfaRequired: requiresMfa(current), mfaVerified: verifiedSecondFactor === true, remember: req.body.remember === true });
   }
   async function finishLogin(req, res, user, password) {
     const enrolled = await User.findById(user._id).select('+mfaSecret +mfaRecoveryHashes');
     if (!enrolled || (enrolled.authVersion || 0) !== (user.authVersion || 0)) return res.status(401).json({ success: false, message: '계정 상태가 변경되었습니다. 다시 로그인해주세요.' });
+    // Operational evidence only: never log identity, passwords, OTPs, keys or challenges.
+    console.info('[auth-policy]', JSON.stringify({ kind: user.kind, registered: requiresMfa(enrolled), hasChallenge: typeof req.body.mfaChallenge === 'string' }));
     if (requiresMfa(enrolled)) {
       const token = req.body.mfaChallenge;
       const pending = typeof token === 'string' ? loginChallenges.get(token) : null;

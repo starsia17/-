@@ -2,6 +2,16 @@
   const screen = document.querySelector('#authScreen');
   const forms = document.querySelectorAll('.auth-form');
   const challenges = new WeakMap();
+  function factorStage(form, enabled) {
+    const code = form.querySelector('[name=code]');
+    if (!code) return;
+    code.hidden = !enabled; code.required = enabled;
+    const label = form.querySelector('label[for="' + code.id + '"]');
+    if (label) label.hidden = !enabled;
+    form.querySelector('button[type=submit]').textContent = enabled ? 'Google Authenticator 코드 확인 후 로그인' : '로그인';
+    form.querySelectorAll('[name=username], [name=password]').forEach(input => { input.readOnly = enabled; });
+  }
+  forms.forEach(form => factorStage(form,false));
   let user = null, epoch = 0, lastActivity = Date.now(), lastCheck = 0, pendingRefresh = null, loggingIn = false;
   let tabToken = sessionStorage.getItem('portfolioTabToken') || '';
   const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('private-portfolio-auth') : null;
@@ -59,7 +69,7 @@
       const selected = button.dataset.authViewButton === name;
       button.classList.toggle('active', selected); button.setAttribute('aria-pressed', String(selected));
     });
-    forms.forEach(form => { challenges.delete(form); const code = form.querySelector('[name=code]'); if (code) code.required = false; form.querySelector('button[type=submit]').textContent = form.dataset.authView === 'register' ? '회원가입' : '로그인'; });
+    forms.forEach(form => { challenges.delete(form); factorStage(form,false); });
     document.querySelector('#authNotice').hidden = true;
   }
   document.querySelectorAll('[data-auth-view-button]').forEach(button => button.addEventListener('click', () => showForm(button.dataset.authViewButton)));
@@ -85,8 +95,13 @@
       }
       const endpoint = name === 'admin' ? '/api/auth/admin/login' : '/api/auth/' + (name === 'register' ? 'register' : 'login');
       const data = await read(await safeFetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values) }));
+      if (name !== 'register' && (data.user?.mfaEnabled === true || data.mfaRequired === true) && data.mfaVerified !== true) {
+        await safeFetch('/api/auth/logout', {method:'POST'});
+        throw Error('2단계 인증이 완료되지 않아 로그인을 차단했습니다. 다시 로그인해주세요.');
+      }
       form.reset();
       challenges.delete(form);
+      factorStage(form,false);
       if (name === 'register') {
         showForm('login'); document.querySelector('#loginUsername').value = values.username;
         document.querySelector('#authNotice').textContent = '가입이 완료되었습니다. 만든 계정으로 로그인해주세요.';
@@ -102,7 +117,7 @@
       notice.textContent = error.message; notice.hidden = false;
       if (error.mfaRequired) {
         if (error.mfaChallenge) { challenges.set(form,error.mfaChallenge); const input=form.querySelector('[name=code]'); if(input) input.value=''; }
-        button.textContent='인증 코드 확인하고 로그인';
+        factorStage(form,true);
         const code = form.querySelector('[name=code]'); if (code) { code.required = true; code.focus(); }
       }
     }

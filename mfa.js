@@ -67,7 +67,7 @@ module.exports = function createMfa(User, Session, auth) {
     return true;
   }
   async function invalidateSessions(req, updated) {
-    await Session.updateOne({ _id: req.authSession._id, userId: req.user._id }, { $set: { authVersion: updated.authVersion, mfaVerified: updated.mfaEnabled === true, mfaPolicyVersion: 2, mfaSetupSecret: null, mfaSetupExpiresAt: null } });
+    await Session.updateOne({ _id: req.authSession._id, userId: req.user._id }, { $set: { authVersion: updated.authVersion, mfaVerified: updated.mfaEnabled === true, mfaPolicyVersion: 2, mfaSetupSecret: null, mfaSetupExpiresAt: null, mfaSetupReplacing: false } });
     // authVersion invalidates every other session even if deletion temporarily fails.
     await Session.deleteMany({ userId: req.user._id, _id: { $ne: req.authSession._id } });
   }
@@ -78,10 +78,11 @@ module.exports = function createMfa(User, Session, auth) {
     app.post('/api/account/security/setup', auth.requireUser, auth.rateLimit, async (req, res, next) => {
       try {
         if (!await passwordGate(req, res)) return;
-        if (req.user.mfaEnabled) return res.status(409).json({ success: false, message: '이미 2단계 인증이 설정되어 있습니다.' });
+        const replacing = req.user.mfaEnabled === true;
+        if (replacing && (req.body.replace !== true || !await verify(req.user, req.body.code))) return res.status(400).json({ success: false, message: '인증 앱 변경에는 현재 인증 코드 또는 미사용 복구 코드가 필요합니다.' });
         const secret = otp.generateSecret();
         const encrypted = encrypt(secret, req.user._id);
-        await Session.updateOne({ _id: req.authSession._id, userId: req.user._id }, { $set: { mfaSetupSecret: encrypted, mfaSetupExpiresAt: new Date(Date.now() + 10 * 60000) } });
+        await Session.updateOne({ _id: req.authSession._id, userId: req.user._id }, { $set: { mfaSetupSecret: encrypted, mfaSetupReplacing: replacing, mfaSetupExpiresAt: new Date(Date.now() + 10 * 60000) } });
         const label = req.user.kind === 'admin' ? '관리자' : req.user.username;
         const uri = otp.generateURI({ label, issuer: '포트폴리브', secret });
         res.json({ success: true, secret, qr: await QRCode.toDataURL(uri, { width: 240, margin: 2 }), expiresIn: 600 });
@@ -94,11 +95,16 @@ module.exports = function createMfa(User, Session, auth) {
         const step = codeStep(req.body.code, decrypt(session.mfaSetupSecret, req.user._id));
         if (step === null) return res.status(400).json({ success: false, message: '인증 앱의 6자리 코드를 확인해주세요.' });
         const recoveryCodes = Array.from({ length: 10 }, () => crypto.randomBytes(16).toString('hex'));
-        const updated = await User.findOneAndUpdate({ _id: req.user._id, authVersion: req.user.authVersion || 0, mfaEnabled: { $ne: true } }, {
+        const updated = await User.findOneAndUpdate({ _id: req.user._id, authVersion: req.user.authVersion || 0, mfaEnabled: session.mfaSetupReplacing === true ? true : { $ne: true } }, {
           $set: { mfaEnabled: true, mfaSecret: session.mfaSetupSecret, mfaLastStep: step, mfaRecoveryHashes: recoveryCodes.map(hash) }, $inc: { authVersion: 1 }
         }, { new: true });
         if (!updated) return res.status(409).json({ success: false, message: '계정이 다른 화면에서 변경되었습니다. 다시 로그인해주세요.' });
+        const saved = await User.findById(req.user._id).select('+mfaSecret +mfaRecoveryHashes');
+        if (!saved || saved.mfaEnabled !== true || saved.mfaSecret !== session.mfaSetupSecret || saved.authVersion !== updated.authVersion || saved.mfaRecoveryHashes?.length !== recoveryCodes.length) {
+          return res.status(503).json({ success: false, message: '2단계 인증 등록 저장을 확인하지 못했습니다. 등록 완료로 처리하지 않았습니다. 잠시 후 계정 보안 상태를 확인해주세요.' });
+        }
         await invalidateSessions(req, updated);
+        console.info('[auth-policy]', JSON.stringify({ kind: req.user.kind, event: 'enrollment-confirmed', replacing: session.mfaSetupReplacing === true }));
         res.json({ success: true, recoveryCodes: recoveryCodes.map(x => x.match(/.{8}/g).join('-')) });
       } catch (error) { next(error); }
     });
@@ -111,6 +117,7 @@ module.exports = function createMfa(User, Session, auth) {
         }, { new: true });
         if (!updated) return res.status(409).json({ success: false, message: '계정이 다른 화면에서 변경되었습니다. 다시 로그인해주세요.' });
         await invalidateSessions(req, updated);
+        console.info('[auth-policy]', JSON.stringify({ kind: req.user.kind, event: 'enrollment-disabled' }));
         res.json({ success: true });
       } catch (error) { next(error); }
     });

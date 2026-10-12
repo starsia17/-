@@ -31,13 +31,19 @@
     const setup = node('div'); setup.hidden = true; form.append(setup);
     const status = node('p'); status.setAttribute('role', 'status'); form.append(status);
     const button = node('button', data.enabled ? '2단계 인증 해제' : '인증 앱 연결 시작'); button.type = 'submit'; button.className = 'edit-post-button'; form.append(button); host.append(form);
-    let confirming = false;
+    let confirming = false, replacing = false;
+    if (data.enabled) {
+      host.append(node('p', 'Google Authenticator에서 항목을 삭제해도 사이트의 인증은 자동 해제되지 않습니다. 앱을 잃어버렸다면 미사용 복구 코드로 로그인하고 아래에서 인증 앱을 변경하세요.'));
+      const replace = node('button', '인증 앱 변경·재등록'); replace.type='button'; replace.className='edit-post-button';
+      replace.addEventListener('click', () => { replacing=true; replace.hidden=true; button.textContent='현재 인증 확인 후 새 앱 연결'; status.textContent='현재 비밀번호와 인증 코드 또는 미사용 복구 코드를 입력하세요. 새 코드 확인 전까지 기존 인증은 유지됩니다.'; password.focus(); });
+      form.append(replace);
+    }
     form.addEventListener('submit', async event => {
       event.preventDefault(); if (!form.reportValidity()) return;
       button.disabled = true; status.textContent = '';
       try {
-        const endpoint = data.enabled ? 'disable' : confirming ? 'confirm' : 'setup';
-        const result = await read(await window.portfolioAuth.fetch('/api/account/security/' + endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: password.value, code: code.value.trim() }) }));
+        const endpoint = confirming ? 'confirm' : replacing ? 'setup' : data.enabled ? 'disable' : 'setup';
+        const result = await read(await window.portfolioAuth.fetch('/api/account/security/' + endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: password.value, code: code.value.trim(), replace: replacing }) }));
         if (epoch !== generation || !active()) return;
         password.value = ''; code.value = '';
         if (endpoint === 'setup') {
