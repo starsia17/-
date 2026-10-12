@@ -1,6 +1,7 @@
 (() => {
   const screen = document.querySelector('#authScreen');
   const forms = document.querySelectorAll('.auth-form');
+  const challenges = new WeakMap();
   let user = null, epoch = 0, lastActivity = Date.now(), lastCheck = 0, pendingRefresh = null, loggingIn = false;
   let tabToken = sessionStorage.getItem('portfolioTabToken') || '';
   const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('private-portfolio-auth') : null;
@@ -24,7 +25,7 @@
   async function read(response) {
     let data;
     try { data = await response.json(); } catch { throw Error('서버에 연결하지 못했습니다. 잠시 후 다시 시도해주세요.'); }
-    if (!response.ok || data.success === false) { const error = Error(data.message || '요청을 처리하지 못했습니다.'); error.mfaRequired = data.mfaRequired === true; throw error; }
+    if (!response.ok || data.success === false) { const error = Error(data.message || '요청을 처리하지 못했습니다.'); error.mfaRequired = data.mfaRequired === true; error.mfaChallenge = data.mfaChallenge; throw error; }
     return data;
   }
   async function refresh() {
@@ -58,11 +59,11 @@
       const selected = button.dataset.authViewButton === name;
       button.classList.toggle('active', selected); button.setAttribute('aria-pressed', String(selected));
     });
-    forms.forEach(form => { const code = form.querySelector('[name=code]'); if (code) code.required = false; });
+    forms.forEach(form => { challenges.delete(form); const code = form.querySelector('[name=code]'); if (code) code.required = false; form.querySelector('button[type=submit]').textContent = form.dataset.authView === 'register' ? '회원가입' : '로그인'; });
     document.querySelector('#authNotice').hidden = true;
   }
   document.querySelectorAll('[data-auth-view-button]').forEach(button => button.addEventListener('click', () => showForm(button.dataset.authViewButton)));
-  document.querySelector('#loginUsername').addEventListener('input', () => { document.querySelector('#loginSecondFactor').required = false; });
+  forms.forEach(form => form.querySelectorAll('[name=username], [name=password]').forEach(input => input.addEventListener('input', () => { challenges.delete(form); const code=form.querySelector('[name=code]'); if(code) code.required=false; })));
   forms.forEach(form => form.addEventListener('submit', async event => {
     event.preventDefault();
     if (!form.reportValidity()) return;
@@ -76,12 +77,16 @@
     try {
       if (name !== 'register') {
         loggingIn = true; ++epoch; setUser(null);
-        tabToken = crypto.randomUUID(); sessionStorage.setItem('portfolioTabToken', tabToken);
+        if (!challenges.has(form)) tabToken = crypto.randomUUID();
+        sessionStorage.setItem('portfolioTabToken', tabToken);
         values.tabToken = tabToken; values.remember = form.querySelector('[name=remember]').checked;
+        if (challenges.has(form)) values.mfaChallenge = challenges.get(form);
+        else delete values.code;
       }
       const endpoint = name === 'admin' ? '/api/auth/admin/login' : '/api/auth/' + (name === 'register' ? 'register' : 'login');
       const data = await read(await safeFetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values) }));
       form.reset();
+      challenges.delete(form);
       if (name === 'register') {
         showForm('login'); document.querySelector('#loginUsername').value = values.username;
         document.querySelector('#authNotice').textContent = '가입이 완료되었습니다. 만든 계정으로 로그인해주세요.';
@@ -95,7 +100,11 @@
     } catch (error) {
       if (name !== 'register') { ++epoch; setUser(null); }
       notice.textContent = error.message; notice.hidden = false;
-      if (error.mfaRequired) { const code = form.querySelector('[name=code]'); if (code) { code.required = true; code.focus(); } }
+      if (error.mfaRequired) {
+        if (error.mfaChallenge) { challenges.set(form,error.mfaChallenge); const input=form.querySelector('[name=code]'); if(input) input.value=''; }
+        button.textContent='인증 코드 확인하고 로그인';
+        const code = form.querySelector('[name=code]'); if (code) { code.required = true; code.focus(); }
+      }
     }
     finally { loggingIn = false; button.disabled = false; }
   }));

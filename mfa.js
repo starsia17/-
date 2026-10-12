@@ -20,7 +20,7 @@ function decrypt(value, ownerId) {
   cipher.setAAD(Buffer.from(String(ownerId))); cipher.setAuthTag(tag);
   return Buffer.concat([cipher.update(data), cipher.final()]).toString('utf8');
 }
-function requiresMfa(user) { return !!user && (user.mfaEnabled === true || (typeof user.mfaSecret === 'string' && user.mfaSecret.length > 0)); }
+function requiresMfa(user) { return !!user && (user.mfaEnabled === true || (typeof user.mfaSecret === 'string' && user.mfaSecret.length > 0) || (Array.isArray(user.mfaRecoveryHashes) && user.mfaRecoveryHashes.length > 0)); }
 function validCode(code) { return typeof code === 'string' && /^\d{6}$/.test(code); }
 function codeStep(code, secret) {
   if (!validCode(code)) return null;

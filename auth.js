@@ -13,8 +13,20 @@ function equal(a, b) {
 const publicUser = user => ({ id: String(user._id), username: user.kind === 'admin' ? '관리자' : user.username, kind: user.kind, canWriteNews: user.kind === 'admin' || user.canWriteNews === true });
 
 module.exports = function createAuth(User, Session, adminPassword = '') {
-  const rateLimit = createRateLimit({ limit: 30 });
+  const loginChallenges = new Map();
+  const rateLimit = createRateLimit({ limit: 30, key: req => {
+    const pending = typeof req.body?.mfaChallenge === 'string' ? loginChallenges.get(req.body.mfaChallenge) : null;
+    return req.ip + (pending && pending.expires > Date.now() && pending.tab === req.body.tabToken ? ':factor' : ':password');
+  } });
   const mfa = require('./mfa')(User, Session, { requireUser, rateLimit, verifyPassword });
+  function challengeFor(user, tabToken) {
+    const now = Date.now();
+    for (const [key, value] of loginChallenges) if (value.expires <= now) loginChallenges.delete(key);
+    if (loginChallenges.size >= 10000) throw Object.assign(Error('로그인 요청이 많습니다. 잠시 후 다시 시도해주세요.'), { status: 503 });
+    const token = crypto.randomBytes(32).toString('hex');
+    loginChallenges.set(token, { id: String(user._id), version: user.authVersion || 0, tab: tabToken, expires: now + 5 * 60000 });
+    return token;
+  }
   function cookieToken(req) {
     const part = (req.headers.cookie || '').split(';').map(value => value.trim()).find(value => value.startsWith(`${COOKIE}=`));
     const value = part ? part.slice(COOKIE.length + 1) : '';
@@ -33,7 +45,7 @@ module.exports = function createAuth(User, Session, adminPassword = '') {
     if (!session) return null;
     const tab = req.get('X-Portfolio-Tab') || (['GET', 'HEAD'].includes(req.method) && /^\/api\/media\/[a-f\d]{24}$/i.test(req.path) && typeof req.query.tab === 'string' ? req.query.tab : '') || '';
     if (!session.remember && !equal(digest(tab), session.tabHash)) return null;
-    const user = await User.findById(session.userId).select('+mfaSecret');
+    const user = await User.findById(session.userId).select('+mfaSecret +mfaRecoveryHashes');
     if (!user) return null;
     if ((session.authVersion || 0) !== (user.authVersion || 0)) return null;
     user.mfaEnabled = requiresMfa(user);
@@ -55,7 +67,7 @@ module.exports = function createAuth(User, Session, adminPassword = '') {
   }
   async function issueSession(req, res, user, verifiedSecondFactor) {
     // Enrollment may change while password hashing or factor verification is running.
-    const current = await User.findById(user._id).select('+mfaSecret');
+    const current = await User.findById(user._id).select('+mfaSecret +mfaRecoveryHashes');
     if (!current || (current.authVersion || 0) !== (user.authVersion || 0) || (requiresMfa(current) && verifiedSecondFactor !== true)) {
       return res.status(401).json({ success: false, mfaRequired: true, message: '인증 상태가 변경되었습니다. 2단계 인증을 포함해 다시 로그인해주세요.' });
     }
@@ -69,7 +81,17 @@ module.exports = function createAuth(User, Session, adminPassword = '') {
     res.json({ success: true, user: publicUser(user), remember: req.body.remember === true });
   }
   async function finishLogin(req, res, user, password) {
+    const enrolled = await User.findById(user._id).select('+mfaSecret +mfaRecoveryHashes');
+    if (!enrolled || (enrolled.authVersion || 0) !== (user.authVersion || 0)) return res.status(401).json({ success: false, message: '계정 상태가 변경되었습니다. 다시 로그인해주세요.' });
+    if (requiresMfa(enrolled)) {
+      const token = req.body.mfaChallenge;
+      const pending = typeof token === 'string' ? loginChallenges.get(token) : null;
+      if (!pending || pending.expires <= Date.now() || pending.id !== String(user._id) || pending.version !== (user.authVersion || 0) || pending.tab !== req.body.tabToken) {
+        return res.status(401).json({ success: false, mfaRequired: true, mfaChallenge: challengeFor(user, req.body.tabToken), message: '비밀번호 확인 완료. 2단계 인증을 위해 Google Authenticator의 6자리 코드를 입력해주세요.' });
+      }
+    }
     if (!await mfa.verify(user, req.body.code)) return res.status(401).json({ success: false, mfaRequired: true, message: '2단계 인증 코드 또는 미사용 복구 코드를 입력해주세요.' });
+    if (typeof req.body.mfaChallenge === 'string') loginChallenges.delete(req.body.mfaChallenge);
     if (user.kind === 'member' && user.passwordKdf !== CURRENT_KDF) {
       const salt = crypto.randomBytes(16).toString('hex');
       const upgraded = await passwordHash(password, salt, CURRENT_KDF);

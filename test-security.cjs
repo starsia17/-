@@ -70,7 +70,14 @@ app.get('/fixture/rate', createRateLimit({ limit: 2 }), (req, res) => res.json({
   }
   async function login(name, code, admin = false) {
     const tab = crypto.randomUUID();
-    const result = await call(admin ? '/api/auth/admin/login' : '/api/auth/login', { method: 'POST', body: { username: name, password: admin ? 'security-fixture-admin' : 'fixture-secure-pass', code, tabToken: tab } });
+    const route = admin ? '/api/auth/admin/login' : '/api/auth/login';
+    const body = { username: name, password: admin ? 'security-fixture-admin' : 'fixture-secure-pass', code, tabToken: tab };
+    let result = await call(route, { method: 'POST', body });
+    if (code && result.data.mfaChallenge) {
+      assert.equal(result.status,401); assert.equal(result.cookie,'portfolio_session=');
+      assert.equal(result.data.user,undefined); assert.match(result.data.mfaChallenge,/^[a-f\d]{64}$/);
+      result = await call(route, { method:'POST', body:{...body,mfaChallenge:result.data.mfaChallenge} });
+    }
     const { headers: responseHeaders, ...rest } = result;
     return { ...rest, responseHeaders, tab };
   }
@@ -107,6 +114,7 @@ app.get('/fixture/rate', createRateLimit({ limit: 2 }), (req, res) => res.json({
     assert.ok(!JSON.stringify(stores.Session).includes(secret));
     assert.equal((await call('/api/account/security/confirm', { ...bob, method: 'POST', body: { code: generateSync({ secret }) } })).status, 400);
     const enabled = await call('/api/account/security/confirm', { ...alice, method: 'POST', body: { code: generateSync({ secret }) } });
+    assert.equal(require('./mfa').requiresMfa({mfaEnabled:false,mfaRecoveryHashes:['registered-hash']}),true);
     assert.equal(enabled.status, 200); assert.equal(enabled.data.recoveryCodes.length, 10);
     // A failed fresh login must revoke the existing verified cookie, not restore it.
     const staleAttempt = await call('/api/auth/login', { ...alice, method: 'POST', body: { username: 'alice', password: 'fixture-secure-pass', tabToken: crypto.randomUUID(), remember: true } });

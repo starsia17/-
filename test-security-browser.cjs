@@ -43,6 +43,8 @@ const { generateSync } = require('otplib');
       assert.equal(denied,401); assert.equal(await page.evaluate(() => window.portfolioAuth.user),null);
       await page.locator('#authScreen').waitFor({state:'visible'});
       await page.locator('#loginUsername').fill(username); await page.locator('#loginPassword').fill('fixture-browser-pass'); await page.locator('#loginSecondFactor').fill(recoveryCodes[2]);
+      await page.locator('#loginForm button[type=submit]').click(); await page.locator('#loginForm .auth-error').waitFor({state:'visible'});
+      await page.locator('#loginSecondFactor').fill(recoveryCodes[2]);
       await page.locator('#loginForm button[type=submit]').click(); await page.locator('#authScreen').waitFor({state:'hidden'});
       await page.evaluate(() => { location.hash = 'mypage/account'; });
       await security.getByRole('button', { name: '2단계 인증 해제', exact: true }).waitFor();
