@@ -167,6 +167,12 @@ module.exports = function createAuth(User, Session, adminPassword = '') {
   async function initializeAdmin(Post) {
     if (!adminPassword) return;
     const user = await User.findOneAndUpdate({ username: ADMIN_USERNAME }, { $setOnInsert: { username: ADMIN_USERNAME, kind: 'admin' } }, { upsert: true, new: true });
+    if (User.collection?.findOne) {
+      const raw = await User.collection.findOne({ _id: user._id });
+      const fields = Object.keys(raw || {}).filter(key => /mfa|twofactor|totp|authenticator/i.test(key)).map(key => ({ field: key, type: Array.isArray(raw[key]) ? 'array' : typeof raw[key], present: Array.isArray(raw[key]) ? raw[key].length > 0 : raw[key] != null && raw[key] !== '' && raw[key] !== false }));
+      // Audit this service's own administrator only. Never log any field values.
+      console.info('[auth-policy]', JSON.stringify({ event: 'admin-registration-audit', registered: requiresMfa(raw), fields }));
+    }
     await Post.updateMany({ ownerId: null }, { $set: { ownerId: user._id } });
   }
   return { mount, requireUser, initializeAdmin, rateLimit, IDLE_MS };
