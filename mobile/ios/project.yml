@@ -7,15 +7,21 @@ targets:
   Portfoliv:
     type: application
     platform: iOS
-    sources: [Portfoliv]
+    sources:
+      - path: Portfoliv
+        excludes: [AppAssets]
+    resources:
+      - path: Portfoliv/AppAssets
+        type: folder
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.portfoliv.app
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: 포트폴리브
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        MARKETING_VERSION: 1.0.0
-        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 1.1.0
+        CURRENT_PROJECT_VERSION: 2
         SWIFT_VERSION: 5.0
         CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SUPPORTS_MACCATALYST: NO

@@ -1,17 +1,17 @@
 import SwiftUI
 import WebKit
 @main struct PortfolivApp: App {
- var body: some Scene { WindowGroup { Browser().ignoresSafeArea(.keyboard) } }
+ @StateObject private var model=BrowserModel()
+ var body: some Scene { WindowGroup { Browser(model:model).ignoresSafeArea(.keyboard).onReceive(NotificationCenter.default.publisher(for:UIApplication.didBecomeActiveNotification)){ _ in model.resume() }.onReceive(NotificationCenter.default.publisher(for:UIApplication.willResignActiveNotification)){ _ in model.pause() } } }
 }
 struct Browser: UIViewRepresentable {
+ let model:BrowserModel
  func makeCoordinator() -> Coordinator { Coordinator() }
  func makeUIView(context: Context) -> WKWebView {
-  let config = WKWebViewConfiguration()
-  config.websiteDataStore = .default()
-  let view = WKWebView(frame: .zero, configuration: config)
+  let view = model.web
   view.navigationDelegate = context.coordinator; view.uiDelegate = context.coordinator
   view.allowsBackForwardNavigationGestures = true
-  view.load(URLRequest(url: URL(string: "https://portfoliv.onrender.com/")!))
+  if view.url == nil { view.load(URLRequest(url: URL(string: "https://portfoliv.onrender.com/")!)) }
   return view
  }
  func updateUIView(_ uiView: WKWebView, context: Context) {}

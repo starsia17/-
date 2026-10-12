@@ -7,8 +7,8 @@ platform="$ANDROID_SDK_ROOT/platforms/android-35/android.jar"
 cd "$(dirname "$0")"
 mkdir -p build/classes build/dex
 "$tools/aapt2" compile --dir res -o build/resources.zip
-"$tools/aapt2" link -o build/unsigned.apk -I "$platform" --manifest AndroidManifest.xml build/resources.zip
-javac -source 8 -target 8 -cp "$platform" -d build/classes src/com/portfoliv/app/MainActivity.java
+"$tools/aapt2" link -o build/unsigned.apk -I "$platform" --manifest AndroidManifest.xml -A assets build/resources.zip
+javac -source 8 -target 8 -cp "$platform" -d build/classes src/com/portfoliv/app/*.java
 find build/classes -name '*.class' > build/classes.list
 "$tools/d8" --lib "$platform" --min-api 26 --output build/dex @build/classes.list
 (cd build/dex && zip -q ../unsigned.apk classes.dex)
